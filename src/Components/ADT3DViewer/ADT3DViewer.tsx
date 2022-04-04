@@ -327,7 +327,7 @@ const ADT3DViewer: React.FC<IADT3DViewerProps & BaseComponentProps> = ({
                         onItemBlur={onElementPanelItemBlured}
                     />
                 )}
-                <SceneViewWrapper
+                {/* <SceneViewWrapper
                     adapter={adapter}
                     config={scenesConfig}
                     sceneId={sceneId}
@@ -353,7 +353,7 @@ const ADT3DViewer: React.FC<IADT3DViewerProps & BaseComponentProps> = ({
                                   )
                             : undefined
                     }}
-                />
+                /> */}
             </div>
             {showPopUp && (
                 <BehaviorsModal

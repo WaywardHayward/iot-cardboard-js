@@ -60,27 +60,7 @@ const ADT3DBuilder: React.FC<ADT3DBuilderProps> = ({
 
     return (
         <BaseComponent>
-            <div className="cb-adt3dbuilder-wrapper">
-                <SceneViewWrapper
-                    objectColorUpdated={objectColorUpdated}
-                    hideViewModePickerUI={hideViewModePickerUI}
-                    sceneViewProps={{
-                        modelUrl: modelUrl,
-                        onMeshClick: meshClick,
-                        onMeshHover: meshHover,
-                        coloredMeshItems: coloredMeshItems,
-                        showMeshesOnHover: showMeshesOnHover ?? true,
-                        showHoverOnSelected: showHoverOnSelected,
-                        outlinedMeshitems: outlinedMeshItems,
-                        getToken: (adapter as any).authService
-                            ? () =>
-                                  (adapter as any).authService.getToken(
-                                      'storage'
-                                  )
-                            : undefined
-                    }}
-                />
-            </div>
+            <div className="cb-adt3dbuilder-wrapper"></div>
         </BaseComponent>
     );
 };

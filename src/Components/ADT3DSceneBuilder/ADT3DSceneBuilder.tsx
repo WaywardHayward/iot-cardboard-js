@@ -39,7 +39,7 @@ import { IADTAdapter } from '../../Models/Constants/Interfaces';
 import BuilderLeftPanel from './Internal/BuilderLeftPanel';
 import { useTranslation } from 'react-i18next';
 import { AbstractMesh } from 'babylonjs/Meshes/abstractMesh';
-import { CustomMeshItem } from '../../Models/Classes/SceneView.types';
+import { CustomMeshItem, Marker } from '../../Models/Classes/SceneView.types';
 import {
     I3DScenesConfig,
     IBehavior,
@@ -53,6 +53,9 @@ import {
     defaultBehavior
 } from '../../Models/Classes/3DVConfig';
 import { IADTObjectColor } from '../../Models/Constants';
+import { SceneViewWrapper } from '../3DV/SceneViewWrapper';
+import { Scene } from 'babylonjs';
+import { useSceneData } from './useSceneViewer';
 
 const contextMenuStyles = mergeStyleSets({
     header: {
@@ -609,6 +612,13 @@ const ADT3DSceneBuilder: React.FC<IADT3DSceneBuilderCardProps> = ({
         });
     };
 
+    const mode: 'Builder' | 'Viewer' = 'Builder';
+    const sceneViewWrapperProps = useSceneData({
+        mode: mode,
+        config: state.config,
+        sceneId: sceneId
+    });
+
     return (
         <SceneBuilderContext.Provider
             value={{
@@ -636,55 +646,123 @@ const ADT3DSceneBuilder: React.FC<IADT3DSceneBuilderCardProps> = ({
                 localeStrings={localeStrings}
                 containerClassName="cb-scene-builder-card-wrapper"
             >
-                {state.config && <BuilderLeftPanel />}
-                <div className="cb-scene-builder-canvas">
-                    {state.config && (
-                        <ADT3DBuilder
+                {mode === 'Builder' && state.config && <BuilderLeftPanel />}
+                {mode === 'Viewer' && <ElementsPanel />}
+                {mode === 'Viewer' && <Popover />}
+                {/* <div className="cb-scene-builder-canvas"> */}
+                {mode === 'Builder' && state.config && (
+                    <>
+                        <SceneViewWrapper
+                            {...sceneViewWrapperProps}
                             objectColorUpdated={objectColorUpdated}
-                            adapter={adapter as IADTAdapter}
-                            modelUrl={
-                                state.config.configuration?.scenes[
-                                    state.config.configuration?.scenes.findIndex(
-                                        (s) => s.id === sceneId
-                                    )
-                                ]?.assets[0].url
-                            }
-                            onMeshClicked={onMeshClicked}
-                            onMeshHovered={onMeshHovered}
-                            outlinedMeshItems={state.outlinedMeshItems}
-                            showHoverOnSelected={state.showHoverOnSelected}
-                            coloredMeshItems={state.coloredMeshItems}
-                            showMeshesOnHover={state.enableHoverOnModel}
+                            // hideViewModePickerUI={hideViewModePickerUI}
+                            sceneViewProps={{
+                                modelUrl:
+                                    state.config.configuration?.scenes[
+                                        state.config.configuration?.scenes.findIndex(
+                                            (s) => s.id === sceneId
+                                        )
+                                    ]?.assets[0].url,
+                                onMeshClick: (
+                                    _marker: Marker,
+                                    mesh: AbstractMesh,
+                                    _scene: Scene,
+                                    e: PointerEvent
+                                ) => onMeshClicked(mesh, e),
+                                onMeshHover: (
+                                    _marker: Marker,
+                                    mesh: AbstractMesh,
+                                    _scene: Scene,
+                                    _e: PointerEvent
+                                ) => onMeshHovered(mesh),
+                                coloredMeshItems: state.coloredMeshItems,
+                                showMeshesOnHover:
+                                    state.enableHoverOnModel ?? true,
+                                showHoverOnSelected: state.showHoverOnSelected,
+                                outlinedMeshitems: state.outlinedMeshItems,
+                                getToken: (adapter as any).authService
+                                    ? () =>
+                                          (adapter as any).authService.getToken(
+                                              'storage'
+                                          )
+                                    : undefined
+                            }}
                         />
-                    )}
-                    {contextualMenuProps.isVisible && (
-                        <div>
-                            <div
-                                id="cb-3d-builder-contextual-menu"
-                                style={{
-                                    left: contextualMenuProps.x,
-                                    top: contextualMenuProps.y,
-                                    position: 'absolute',
-                                    width: '1px',
-                                    height: '1px'
-                                }}
-                            />
-                            <ContextualMenu
-                                items={contextualMenuProps.items}
-                                hidden={!contextualMenuProps.isVisible}
-                                target="#cb-3d-builder-contextual-menu"
-                                onDismiss={() =>
-                                    setContextualMenuProps({
-                                        isVisible: false,
-                                        x: 0,
-                                        y: 0,
-                                        items: []
-                                    })
+                        {/* <ADT3DBuilder
+                                objectColorUpdated={objectColorUpdated}
+                                adapter={adapter as IADTAdapter}
+                                modelUrl={
+                                   
                                 }
-                            />
-                        </div>
-                    )}
-                </div>
+                                onMeshClicked={onMeshClicked}
+                                onMeshHovered={onMeshHovered}
+                                outlinedMeshItems={state.outlinedMeshItems}
+                                showHoverOnSelected={state.showHoverOnSelected}
+                                coloredMeshItems={state.coloredMeshItems}
+                                showMeshesOnHover={state.enableHoverOnModel}
+                            /> */}
+                    </>
+                )}
+                {/* </div> */}
+                {mode === 'Viewer' && (
+                    <SceneViewWrapper
+                        {...sceneViewWrapperProps}
+                        adapter={adapter}
+                        config={state.config}
+                        sceneId={sceneId}
+                        sceneVisuals={sceneVisuals}
+                        addInProps={addInProps}
+                        hideViewModePickerUI={hideViewModePickerUI}
+                        sceneViewProps={{
+                            badgeGroups: alertBadges,
+                            modelUrl: modelUrl,
+                            coloredMeshItems: coloredMeshItems,
+                            outlinedMeshitems: outlinedMeshItems,
+                            showHoverOnSelected: showHoverOnSelected,
+                            showMeshesOnHover: showMeshesOnHover,
+                            zoomToMeshIds: zoomToMeshIds,
+                            unzoomedMeshOpacity: unzoomedMeshOpacity,
+                            onMeshClick: (marker, mesh, scene) =>
+                                meshClick(marker, mesh, scene),
+                            onMeshHover: (marker, mesh) =>
+                                meshHover(marker, mesh),
+                            getToken: (adapter as any).authService
+                                ? () =>
+                                      (adapter as any).authService.getToken(
+                                          'storage'
+                                      )
+                                : undefined
+                        }}
+                    />
+                )}
+
+                {contextualMenuProps.isVisible && (
+                    <div>
+                        <div
+                            id="cb-3d-builder-contextual-menu"
+                            style={{
+                                left: contextualMenuProps.x,
+                                top: contextualMenuProps.y,
+                                position: 'absolute',
+                                width: '1px',
+                                height: '1px'
+                            }}
+                        />
+                        <ContextualMenu
+                            items={contextualMenuProps.items}
+                            hidden={!contextualMenuProps.isVisible}
+                            target="#cb-3d-builder-contextual-menu"
+                            onDismiss={() =>
+                                setContextualMenuProps({
+                                    isVisible: false,
+                                    x: 0,
+                                    y: 0,
+                                    items: []
+                                })
+                            }
+                        />
+                    </div>
+                )}
             </BaseComponent>
         </SceneBuilderContext.Provider>
     );
