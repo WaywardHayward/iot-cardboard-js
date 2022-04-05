@@ -5,12 +5,11 @@ import {
     Theme,
     FontSizes
 } from '@fluentui/react';
-import { AbstractMesh, Scene } from 'babylonjs';
+import { AbstractMesh } from 'babylonjs';
 import {
     MutableRefObject,
     SetStateAction,
     useCallback,
-    useMemo,
     useReducer,
     useRef,
     useState
@@ -20,16 +19,11 @@ import {
     defaultBehavior,
     DatasourceType
 } from '../../Models/Classes/3DVConfig';
-import { CustomMeshItem, Marker } from '../../Models/Classes/SceneView.types';
+import { CustomMeshItem } from '../../Models/Classes/SceneView.types';
 import ViewerConfigUtility from '../../Models/Classes/ViewerConfigUtility';
-import {
-    ADT3DSceneBuilderMode,
-    IADTObjectColor,
-    ISceneViewWrapperProps
-} from '../../Models/Constants';
+import { ADT3DSceneBuilderMode, IADTObjectColor } from '../../Models/Constants';
 import { deepCopy, createGUID } from '../../Models/Services/Utils';
 import {
-    I3DScenesConfig,
     IBehavior,
     ITwinToObjectMapping
 } from '../../Models/Types/Generated/3DScenesConfiguration-v1.0.0';
@@ -124,7 +118,7 @@ export const useMeshHandlers = (
         for (const element of state.elements) {
             if (element.objectIDs.includes(mesh.id)) {
                 // create context menu items for each element
-                const item = {
+                const item: IContextualMenuItem = {
                     key: element.id,
                     text: t('3dSceneBuilder.edit', {
                         elementDisplayName: element.displayName
@@ -132,7 +126,7 @@ export const useMeshHandlers = (
                     iconProps: {
                         iconName: 'Edit',
                         style: {
-                            fontSize: '14px',
+                            fontSize: FontSizes.size14,
                             color: theme.semanticColors.bodyText
                         }
                     },
@@ -184,7 +178,7 @@ export const useMeshHandlers = (
         });
     };
 
-    const meshClickOnEditElement = (mesh) => {
+    const meshClickOnEditElement = (mesh: AbstractMesh) => {
         const selectedMesh = coloredMeshItems.find(
             (item) => item.meshId === mesh.id
         );

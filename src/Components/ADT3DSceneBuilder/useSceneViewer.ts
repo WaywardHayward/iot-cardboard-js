@@ -1,4 +1,6 @@
-import { useMemo } from 'react';
+import { AbstractMesh, Scene } from 'babylonjs';
+import { useCallback, useMemo } from 'react';
+import { Marker } from '../../Models/Classes/SceneView.types';
 import { ISceneViewWrapperProps } from '../../Models/Constants';
 import { I3DScenesConfig } from '../../Models/Types/Generated/3DScenesConfiguration-v1.0.0';
 
@@ -8,18 +10,27 @@ export const useSceneData = (props: {
     config: I3DScenesConfig;
 }): ISceneViewWrapperProps => {
     const { config, mode, sceneId } = props;
-    const result: ISceneViewWrapperProps = useMemo(() => {
-        const modelUrl =
+    const modelUrl = useMemo(
+        () =>
             config.configuration?.scenes[
                 config.configuration?.scenes.findIndex((s) => s.id === sceneId)
-            ]?.assets[0].url;
+            ]?.assets[0].url,
+        [config, sceneId]
+    );
+    const onMeshClick = useCallback(
+        (_marker: Marker, mesh: AbstractMesh, _scene: Scene, e: PointerEvent) =>
+            onMeshClicked(mesh, e),
+        [onMeshClick]
+    );
 
-        return {
+    const result: ISceneViewWrapperProps =
+        // useMemo(() =>
+        {
             sceneViewProps: {
                 modelUrl: modelUrl
             }
         };
-    }, [config, mode, sceneId]);
+    // }, [mode, modelUrl]);
 
     return result;
 };
