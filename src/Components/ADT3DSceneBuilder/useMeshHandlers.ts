@@ -81,6 +81,14 @@ export const useMeshHandlers = (
             payload: behavior
         });
     };
+
+    const setSelectedBuilderElement = (element: ITwinToObjectMapping) => {
+        dispatch({
+            type: SET_ADT_SCENE_BUILDER_SELECTED_ELEMENT,
+            payload: element
+        });
+    };
+
     const setBuilderMode = (mode: ADT3DSceneBuilderMode) => {
         dispatch({
             type: SET_ADT_SCENE_BUILDER_MODE,
@@ -112,87 +120,25 @@ export const useMeshHandlers = (
         t
     );
 
-    const meshClickOnElementsIdle = (mesh: AbstractMesh, e: PointerEvent) => {
-        elementContextualMenuItems.current[1].sectionProps.items = [];
-        // find elements which contian the clicked mesh
-        for (const element of state.elements) {
-            if (element.objectIDs.includes(mesh.id)) {
-                // create context menu items for each element
-                const item: IContextualMenuItem = {
-                    key: element.id,
-                    text: t('3dSceneBuilder.edit', {
-                        elementDisplayName: element.displayName
-                    }),
-                    iconProps: {
-                        iconName: 'Edit',
-                        style: {
-                            fontSize: FontSizes.size14,
-                            color: theme.semanticColors.bodyText
-                        }
-                    },
-                    onClick: () => {
-                        elementContextualMenuItems.current[1].sectionProps.items = [];
-                        dispatch({
-                            type: SET_ADT_SCENE_BUILDER_SELECTED_ELEMENT,
-                            payload: element
-                        });
-                        dispatch({
-                            type: SET_ADT_SCENE_BUILDER_MODE,
-                            payload: ADT3DSceneBuilderMode.EditElement
-                        });
-                    },
-                    onMouseOver: () => {
-                        // highlight the hovered element
-                        setOutlinedMeshItems(
-                            createCustomMeshItems(
-                                element.objectIDs,
-                                state.objectColor.outlinedMeshHoverColor
-                            )
-                        );
-                    },
-                    onMouseOut: () => {
-                        setOutlinedMeshItems([]);
-                        setColoredMeshItems(previouslyColoredMeshItems.current);
-                    }
-                };
+    const meshClickOnElementsIdle = getMeshClickOnElementsIdle(
+        elementContextualMenuItems,
+        previouslyColoredMeshItems,
+        state.elements,
+        state.objectColor,
+        theme,
+        addContextualMenuItems,
+        setOutlinedMeshItems,
+        setBuilderMode,
+        setColoredMeshItems,
+        setContextualMenuProps,
+        setSelectedBuilderElement,
+        t
+    );
 
-                // add edit element items to the context menu in the correct position
-                addContextualMenuItems(
-                    item,
-                    elementContextualMenuItems.current[1]
-                );
-            }
-        }
-
-        // colored the selected mesh
-        const coloredMesh: CustomMeshItem = { meshId: mesh.id, color: null };
-        setColoredMeshItems([coloredMesh]);
-        setOutlinedMeshItems([]);
-        previouslyColoredMeshItems.current = [coloredMesh];
-
-        setContextualMenuProps({
-            isVisible: true,
-            x: e.clientX,
-            y: e.clientY,
-            items: elementContextualMenuItems.current
-        });
-    };
-
-    const meshClickOnEditElement = (mesh: AbstractMesh) => {
-        const selectedMesh = coloredMeshItems.find(
-            (item) => item.meshId === mesh.id
-        );
-        let coloredMeshes = [...coloredMeshItems];
-
-        if (selectedMesh) {
-            coloredMeshes = coloredMeshItems.filter(
-                (item) => item.meshId !== selectedMesh.meshId
-            );
-        } else {
-            coloredMeshes.push({ meshId: mesh.id });
-        }
-        setColoredMeshItems(coloredMeshes);
-    };
+    const meshClickOnEditElement = getMeshClickOnEditElement(
+        coloredMeshItems,
+        setColoredMeshItems
+    );
 
     const onMeshClicked = useCallback(
         (mesh: AbstractMesh, e: PointerEvent) => {
@@ -415,5 +361,108 @@ const getMeshClickOnBehaviorsIdle = memoizeFunction(
                 items: behaviorContextualMenuItems.current
             });
         }
+    }
+);
+
+const getMeshClickOnElementsIdle = memoizeFunction(
+    (
+        elementContextualMenuItems: MutableRefObject<IContextualMenuItem[]>,
+        previouslyColoredMeshItems: MutableRefObject<CustomMeshItem[]>,
+        stateElements: ITwinToObjectMapping[],
+        objectColor: IADTObjectColor,
+        theme: Theme,
+        addContextualMenuItems: (
+            item: IContextualMenuItem,
+            targetMenu: IContextualMenuItem
+        ) => void,
+        setOutlinedMeshItems: (
+            outlinedMeshItems: Array<CustomMeshItem>
+        ) => void,
+        setBuilderMode: (mode: ADT3DSceneBuilderMode) => void,
+        setColoredMeshItems: (items: CustomMeshItem[]) => void,
+        setContextualMenuProps: (
+            value: SetStateAction<IContextMenuProps>
+        ) => void,
+        setSelectedBuilderElement: (element: ITwinToObjectMapping) => void,
+        t: TFunction<string>
+    ) => (mesh: AbstractMesh, e: PointerEvent) => {
+        elementContextualMenuItems.current[1].sectionProps.items = [];
+        // find elements which contian the clicked mesh
+        for (const element of stateElements) {
+            if (element.objectIDs.includes(mesh.id)) {
+                // create context menu items for each element
+                const item: IContextualMenuItem = {
+                    key: element.id,
+                    text: t('3dSceneBuilder.edit', {
+                        elementDisplayName: element.displayName
+                    }),
+                    iconProps: {
+                        iconName: 'Edit',
+                        style: {
+                            fontSize: FontSizes.size14,
+                            color: theme.semanticColors.bodyText
+                        }
+                    },
+                    onClick: () => {
+                        elementContextualMenuItems.current[1].sectionProps.items = [];
+                        setSelectedBuilderElement(element);
+                        setBuilderMode(ADT3DSceneBuilderMode.EditElement);
+                    },
+                    onMouseOver: () => {
+                        // highlight the hovered element
+                        setOutlinedMeshItems(
+                            createCustomMeshItems(
+                                element.objectIDs,
+                                objectColor.outlinedMeshHoverColor
+                            )
+                        );
+                    },
+                    onMouseOut: () => {
+                        setOutlinedMeshItems([]);
+                        setColoredMeshItems(previouslyColoredMeshItems.current);
+                    }
+                };
+
+                // add edit element items to the context menu in the correct position
+                addContextualMenuItems(
+                    item,
+                    elementContextualMenuItems.current[1]
+                );
+            }
+        }
+
+        // colored the selected mesh
+        const coloredMesh: CustomMeshItem = { meshId: mesh.id, color: null };
+        setColoredMeshItems([coloredMesh]);
+        setOutlinedMeshItems([]);
+        previouslyColoredMeshItems.current = [coloredMesh];
+
+        setContextualMenuProps({
+            isVisible: true,
+            x: e.clientX,
+            y: e.clientY,
+            items: elementContextualMenuItems.current
+        });
+    }
+);
+
+const getMeshClickOnEditElement = memoizeFunction(
+    (
+        coloredMeshItems: CustomMeshItem[],
+        setColoredMeshItems: (items: CustomMeshItem[]) => void
+    ) => (mesh: AbstractMesh) => {
+        const selectedMesh = coloredMeshItems.find(
+            (item) => item.meshId === mesh.id
+        );
+        let coloredMeshes = [...coloredMeshItems];
+
+        if (selectedMesh) {
+            coloredMeshes = coloredMeshItems.filter(
+                (item) => item.meshId !== selectedMesh.meshId
+            );
+        } else {
+            coloredMeshes.push({ meshId: mesh.id });
+        }
+        setColoredMeshItems(coloredMeshes);
     }
 );
