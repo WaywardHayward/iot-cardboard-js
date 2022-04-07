@@ -70,11 +70,12 @@ export const SceneBuilderContext = React.createContext<I3DSceneBuilderContext>(
 );
 
 const ADT3DSceneBuilder: React.FC<IADT3DSceneBuilderCardProps> = ({
-    sceneId,
     adapter,
-    theme,
+    children,
     locale,
-    localeStrings
+    localeStrings,
+    sceneId,
+    theme
 }) => {
     const { t } = useTranslation();
     const fluentTheme = useTheme();
@@ -309,12 +310,12 @@ const ADT3DSceneBuilder: React.FC<IADT3DSceneBuilderCardProps> = ({
         setColoredMeshItems(coloredMeshes);
     };
 
-    const objectColorUpdated = (objectColor: IADTObjectColor) => {
-        dispatch({
-            type: SET_ADT_SCENE_OBJECT_COLOR,
-            payload: objectColor
-        });
-    };
+    // const objectColorUpdated = (objectColor: IADTObjectColor) => {
+    //     dispatch({
+    //         type: SET_ADT_SCENE_OBJECT_COLOR,
+    //         payload: objectColor
+    //     });
+    // };
 
     const mode: 'Builder' | 'Viewer' = 'Builder';
     const sceneViewWrapperProps = useSceneData({
@@ -351,42 +352,43 @@ const ADT3DSceneBuilder: React.FC<IADT3DSceneBuilderCardProps> = ({
                 containerClassName="cb-scene-builder-card-wrapper"
             >
                 {mode === 'Builder' && state.config && <BuilderLeftPanel />}
-                {mode === 'Viewer' && <ElementsPanel />}
-                {mode === 'Viewer' && <Popover />}
+                {children}
+                {/* {mode === 'Viewer' && <ElementsPanel />}
+                {mode === 'Viewer' && <Popover />}*/}
                 <SceneViewWrapper
                     {...sceneViewWrapperProps}
-                    objectColorUpdated={objectColorUpdated}
-                    // hideViewModePickerUI={hideViewModePickerUI}
-                    sceneViewProps={{
-                        // modelUrl:
-                        //     state.config.configuration?.scenes[
-                        //         state.config.configuration?.scenes.findIndex(
-                        //             (s) => s.id === sceneId
-                        //         )
-                        //     ]?.assets[0].url,
-                        onMeshClick: (
-                            _marker: Marker,
-                            mesh: AbstractMesh,
-                            _scene: Scene,
-                            e: PointerEvent
-                        ) => onMeshClicked(mesh, e),
-                        onMeshHover: (
-                            _marker: Marker,
-                            mesh: AbstractMesh,
-                            _scene: Scene,
-                            _e: PointerEvent
-                        ) => onMeshHovered(mesh),
-                        coloredMeshItems: state.coloredMeshItems,
-                        showMeshesOnHover: state.enableHoverOnModel ?? true,
-                        showHoverOnSelected: state.showHoverOnSelected,
-                        outlinedMeshitems: state.outlinedMeshItems,
-                        getToken: (adapter as any).authService
-                            ? () =>
-                                  (adapter as any).authService.getToken(
-                                      'storage'
-                                  )
-                            : undefined
-                    }}
+                    // objectColorUpdated={objectColorUpdated}
+                    // // hideViewModePickerUI={hideViewModePickerUI}
+                    // sceneViewProps={{
+                    //     // modelUrl:
+                    //     //     state.config.configuration?.scenes[
+                    //     //         state.config.configuration?.scenes.findIndex(
+                    //     //             (s) => s.id === sceneId
+                    //     //         )
+                    //     //     ]?.assets[0].url,
+                    //     onMeshClick: (
+                    //         _marker: Marker,
+                    //         mesh: AbstractMesh,
+                    //         _scene: Scene,
+                    //         e: PointerEvent
+                    //     ) => onMeshClicked(mesh, e),
+                    //     onMeshHover: (
+                    //         _marker: Marker,
+                    //         mesh: AbstractMesh,
+                    //         _scene: Scene,
+                    //         _e: PointerEvent
+                    //     ) => onMeshHovered(mesh),
+                    //     coloredMeshItems: state.coloredMeshItems,
+                    //     showMeshesOnHover: state.enableHoverOnModel ?? true,
+                    //     showHoverOnSelected: state.showHoverOnSelected,
+                    //     outlinedMeshitems: state.outlinedMeshItems,
+                    //     getToken: (adapter as any).authService
+                    //         ? () =>
+                    //               (adapter as any).authService.getToken(
+                    //                   'storage'
+                    //               )
+                    //         : undefined
+                    // }}
                 />
                 {/* <div className="cb-scene-builder-canvas"> */}
                 {mode === 'Builder' && state.config && (
@@ -407,7 +409,7 @@ const ADT3DSceneBuilder: React.FC<IADT3DSceneBuilderCardProps> = ({
                     </>
                 )}
                 {/* </div> */}
-                {mode === 'Viewer' && (
+                {/* {mode === 'Viewer' && (
                     <SceneViewWrapper
                         {...sceneViewWrapperProps}
                         adapter={adapter}
@@ -437,7 +439,7 @@ const ADT3DSceneBuilder: React.FC<IADT3DSceneBuilderCardProps> = ({
                                 : undefined
                         }}
                     />
-                )}
+                )} */}
 
                 {contextualMenuProps.isVisible && (
                     <div>
