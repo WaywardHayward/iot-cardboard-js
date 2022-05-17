@@ -92,7 +92,7 @@ const ModelViewerModePicker: React.FC<ModelViewerModePickerProps> = (props) => {
         onChangeObjectColor(objectColorOptions[0].color);
         onChangeSceneBackground(backgroundColorOptions[0].color);
         onChangeObjectStyle(ViewerObjectStyle.Default);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        // // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     useEffect(() => {
