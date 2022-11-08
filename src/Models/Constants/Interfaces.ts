@@ -38,7 +38,11 @@ import {
     AdapterMethodParams,
     AdapterMethodParamsForGetADTModels,
     AdapterMethodParamsForGetADTTwinsByModelId,
-    AdapterMethodParamsForSearchADTTwins
+    AdapterMethodParamsForSearchADTTwins,
+    AdapterMethodParamsForGetAzureResources,
+    AzureAccessPermissionRoleGroups,
+    AdapterMethodParamsForSearchTwinsByQuery,
+    ADTResourceIdentifier
 } from './Types';
 import {
     ADTModel_ImgPropertyPositions_PropertyName,
@@ -46,15 +50,12 @@ import {
 } from './Constants';
 import ExpandedADTModelData from '../Classes/AdapterDataClasses/ExpandedADTModelData';
 import {
-    AzureRoleAssignmentsData,
-    AzureResourcesData
+    AzureResourceData,
+    AzureResourcesData,
+    AzureSubscriptionData
 } from '../Classes/AdapterDataClasses/AzureManagementData';
 import ADTScenesConfigData from '../Classes/AdapterDataClasses/ADTScenesConfigData';
 import ADT3DViewerData from '../Classes/AdapterDataClasses/ADT3DViewerData';
-import {
-    AzureUserAssignmentsData,
-    AzureSubscriptionData
-} from '../Classes/AdapterDataClasses/AzureManagementData';
 import { AssetProperty } from '../Classes/Simulations/Asset';
 import {
     CustomMeshItem,
@@ -72,6 +73,12 @@ import {
 import ADT3DSceneAdapter from '../../Adapters/ADT3DSceneAdapter';
 import { WrapperMode } from '../../Components/3DV/SceneView.types';
 import MockAdapter from '../../Adapters/MockAdapter';
+import {
+    DtdlInterface,
+    DtdlInterfaceContent,
+    DtdlProperty,
+    DtdlRelationship
+} from './dtdlInterfaces';
 import { IStyleFunctionOrObject } from '@fluentui/react';
 import { ISceneViewWrapperStyles } from '../../Components/3DV/SceneViewWrapper.types';
 import {
@@ -83,6 +90,9 @@ import {
     IADT3DViewerStyles
 } from '../../Components/ADT3DViewer/ADT3DViewer.types';
 import { BaseComponentProps } from '../../Components/BaseComponent/BaseComponent.types';
+import ADTAdapter from '../../Adapters/ADTAdapter';
+import ADTInstanceTimeSeriesConnectionData from '../Classes/AdapterDataClasses/ADTInstanceTimeSeriesConnectionData';
+import ADXTimeSeriesData from '../Classes/AdapterDataClasses/ADXTimeSeriesData';
 
 export interface IAction {
     type: string;
@@ -165,7 +175,7 @@ export interface IUseAdapter<T extends IAdapterData> {
     adapterResult: AdapterResult<T>;
 
     /** Calls adapter method (safe on unmount) and updates adapter result */
-    callAdapter: (params?: AdapterMethodParams) => void;
+    callAdapter: (params?: AdapterMethodParams) => Promise<void>;
 
     /** Cancel adapter method and set the adapter result to null if not explicityly prevented using shouldPreserveResult parameter */
     cancelAdapter: (shouldPreserveResult?: boolean) => void;
@@ -252,30 +262,78 @@ export interface IHierarchyNode {
     isNewlyAdded?: boolean;
 }
 
+// START of Azure Management plane interfaces
+export interface IAzureResources {
+    value: IAzureResource[];
+    nextLink?: string;
+}
+
 export interface IAzureResource {
     id: string;
     name: string;
     type: AzureResourceTypes;
     [additionalProperty: string]: any;
     properties: Record<string, any>;
+    subscriptionName?: string; // additional property we add to keep track of the subscription name in resource information to show in the ResourcePicker dropdown
+}
+export interface IAzureSubscription
+    extends Omit<IAzureResource, 'type' | 'name' | 'properties'> {
+    subscriptionId: string;
+    tenantId: string;
+    displayName: string;
 }
 
-export interface IADTInstance {
-    // derived from IAzureResource
-    id: string;
-    name: string; // e.g. cardboard
-    hostName: string; // e.g. cardboard.api.wcus.digitaltwins.azure.net
-    location: string; // e.g. westcentralus
+export interface IAzureRoleAssignment extends IAzureResource {
+    type: AzureResourceTypes.RoleAssignment;
+    properties: IAzureRoleAssignmentPropertyData;
 }
 
-export interface IStorageContainer {
-    // derived from IAzureResource
-    id: string;
-    name: string;
-    url?: string;
+export interface IADTInstance extends IAzureResource {
+    type: AzureResourceTypes.DigitalTwinInstance;
+    properties: IADTInstancePropertyData;
+    location: string;
 }
 
-export interface IADTInstanceConnection {
+export interface IAzureStorageAccount extends IAzureResource {
+    type: AzureResourceTypes.StorageAccount;
+    properties: IAzureStorageAccountPropertyData;
+}
+
+export interface IAzureStorageBlobContainer extends IAzureResource {
+    type: AzureResourceTypes.StorageBlobContainer;
+}
+
+export interface IAzureTimeSeriesDatabaseConnection extends IAzureResource {
+    type: AzureResourceTypes.TimeSeriesConnection;
+    properties: IAzureTimeSeriesDatabaseConnectionPropertyData;
+}
+
+export interface IAzureRoleAssignmentPropertyData {
+    roleDefinitionId: string;
+    [additionalProperty: string]: any;
+}
+
+export interface IADTInstancePropertyData {
+    hostName: string;
+    [additionalProperty: string]: any;
+}
+
+export interface IAzureStorageAccountPropertyData {
+    primaryEndpoints: { blob: string; [additionalProperty: string]: any };
+    [additionalProperty: string]: any;
+}
+
+export interface IAzureTimeSeriesDatabaseConnectionPropertyData {
+    connectionType: 'AzureDataExplorer' | string;
+    /** Kusto cluster url */
+    adxEndpointUri: string;
+    adxDatabaseName: string;
+    adxTableName: string;
+    [additionalProperty: string]: any;
+}
+// END of Azure Management plane interfaces
+
+export interface IADXConnection {
     kustoClusterUrl: string;
     kustoDatabaseName: string;
     kustoTableName: string;
@@ -414,10 +472,14 @@ export interface IModelledPropertyBuilderAdapter {
     ): Promise<AdapterResult<ADTTwinToModelMappingData>>;
 }
 
+export type IQueryBuilderAdapter = ADTAdapter | MockAdapter;
+
 export interface IADT3DViewerAdapter {
     getSceneData(
         sceneId: string,
-        config: I3DScenesConfig
+        config: I3DScenesConfig,
+        visibleLayerIds?: string[],
+        bustCache?: boolean
     ): AdapterReturnType<ADT3DViewerData>;
 }
 
@@ -433,6 +495,9 @@ export interface IADTAdapter
     ): AdapterReturnType<ADTAdapterTwinsData>;
     searchADTTwins(
         params: AdapterMethodParamsForSearchADTTwins
+    ): AdapterReturnType<ADTAdapterTwinsData>;
+    searchTwinsByQuery(
+        params: AdapterMethodParamsForSearchTwinsByQuery
     ): AdapterReturnType<ADTAdapterTwinsData>;
     getRelationships(id: string): Promise<AdapterResult<ADTRelationshipsData>>;
     getADTTwin(twinId: string): Promise<AdapterResult<ADTTwinData>>;
@@ -474,24 +539,28 @@ export interface IAzureManagementAdapter {
     getRoleAssignments: (
         resourceId: string,
         uniqueObjectId: string
-    ) => AdapterReturnType<AzureUserAssignmentsData>;
+    ) => AdapterReturnType<AzureResourcesData>;
     hasRoleDefinitions: (
         resourceId: string,
         uniqueObjectId: string,
-        enforcedRoleIds: Array<AzureAccessPermissionRoles>, // roles that have to exist
-        alternatedRoleIds: Array<AzureAccessPermissionRoles> // roles that one or the other has to exist
+        accessRolesToCheck: AzureAccessPermissionRoleGroups
     ) => Promise<boolean>;
     getResources: (
-        resourceType: AzureResourceTypes,
-        providerEndpoint: string,
-        tenantId?: string,
-        uniqueObjectId?: string
+        params: AdapterMethodParamsForGetAzureResources
     ) => AdapterReturnType<AzureResourcesData>;
+    getResourcesByPermissions: (params: {
+        getResourcesParams: AdapterMethodParamsForGetAzureResources;
+        requiredAccessRoles: AzureAccessPermissionRoleGroups;
+    }) => AdapterReturnType<AzureResourcesData>;
     assignRole: (
         roleId: AzureAccessPermissionRoles,
         resourceId: string, // scope
         uniqueObjectId: string
-    ) => AdapterReturnType<AzureRoleAssignmentsData>;
+    ) => AdapterReturnType<AzureResourcesData>;
+    getTimeSeriesConnectionInformation: (
+        adtInstanceIdentifier: ADTResourceIdentifier
+    ) => AdapterReturnType<ADTInstanceTimeSeriesConnectionData>;
+    getResourceById: (id: string) => AdapterReturnType<AzureResourceData>;
 }
 
 export interface IBlobAdapter {
@@ -506,6 +575,17 @@ export interface IBlobAdapter {
     ) => AdapterReturnType<StorageBlobsData>;
     putBlob: (file: File) => AdapterReturnType<StorageBlobsData>;
     resetSceneConfig(): AdapterReturnType<ADTScenesConfigData>;
+}
+
+export interface IADXAdapter {
+    setADXConnectionInformation: (
+        adxConnectionInformation: IADXConnection
+    ) => void;
+    getADXConnectionInformation: () => IADXConnection | null;
+    getTimeSeriesData: (
+        query: string,
+        connection?: IADXConnection
+    ) => AdapterReturnType<ADXTimeSeriesData>;
 }
 
 export interface IBaseStandardModelSearchAdapter {
@@ -716,7 +796,6 @@ export interface ISceneViewWrapperProps {
     sceneViewProps: ISceneViewProps;
     sceneVisuals?: SceneVisual[];
     addInProps?: IADT3DAddInProps;
-    hideViewModePickerUI?: boolean;
     selectedVisual?: Partial<SceneVisual>;
     objectColorUpdated?: (objectColor: IADTObjectColor) => void;
     wrapperMode: WrapperMode;
@@ -729,10 +808,9 @@ export interface ISceneViewWrapperProps {
 export interface IADT3DViewerProps extends BaseComponentProps {
     adapter:
         | IADT3DViewerAdapter
-        | (IADT3DViewerAdapter & IPropertyInspectorAdapter);
+        | (IADT3DViewerAdapter & IPropertyInspectorAdapter & IADXAdapter);
     sceneId: string;
     scenesConfig: I3DScenesConfig;
-    pollingInterval: number;
     title?: string;
     connectionLineColor?: string;
     enableMeshSelection?: boolean;
@@ -794,43 +872,83 @@ export interface IStorageBlob {
     Properties: Record<string, any>;
 }
 
-export interface IAzureUserRoleAssignments {
-    value: IAzureRoleAssignment[];
+export interface IOATGraphCustomNodeProps extends IOATNodeElement {
+    isConnectable: boolean;
 }
 
-export interface IAzureRoleAssignment extends IAzureResource {
-    type: AzureResourceTypes.RoleAssignments;
-    properties: IAzureRoleAssignmentPropertyData;
-}
-
-export interface IAzureRoleAssignmentPropertyData {
-    roleDefinitionId: string;
-    [additionalProperty: string]: any;
-}
-
-export interface IAzureUserSubscriptions {
-    value: IAzureSubscriptions[];
-}
-
-export interface IAzureSubscriptions {
-    subscriptionId: string;
-    tenantId: string;
-    displayName: string;
-}
-
-export interface IAzureResourceGroup extends IAzureResource {
-    type: AzureResourceTypes.ResourceGroups;
-}
+// eslint-disable-next-line @typescript-eslint/no-empty-interface
+export interface IOATGraphCustomEdgeProps extends IOATRelationshipElement {}
 
 export interface IAliasedTwinProperty {
     alias: 'PrimaryTwin' | string;
     property: string;
 }
 
+export interface ILanguageOption {
+    key: string;
+}
+
+export interface DTDLPropertySchema {
+    '@type': string;
+    fields?: Record<string, any>[];
+    enumValues?: DTDLPropertyEnumValue[];
+    mapKey?: Record<string, any>;
+    mapValue?: Record<string, any>;
+    valueSchema?: string;
+}
+export interface DTDLPropertyEnumValue {
+    displayName?: string | Record<string, unknown>;
+    '@id'?: string;
+    name: string;
+    enumValue: string;
+    description?: string;
+    comment?: string;
+}
+
+export interface IOATNodeElement {
+    id: string;
+    data?: DtdlInterface;
+    position?: IOATNodePosition;
+    type?: string;
+}
+
+export interface IOATNodePosition {
+    x: number;
+    y: number;
+}
+
+export interface IOATRelationshipElement {
+    id: string;
+    label?: string;
+    markerEnd?: string;
+    source: string;
+    sourceHandle?: string;
+    target: string;
+    targetHandle?: string;
+    type?: string;
+    data?: DtdlRelationship | DtdlInterfaceContent;
+}
+
+export interface IOATLastPropertyFocused {
+    item: DtdlProperty;
+    index: number;
+}
+
+export interface IOATProperty {
+    id: string;
+    displayName: string;
+    index: number;
+}
 export interface IBlobServiceCorsRule {
     AllowedOrigins: Array<string>;
     AllowedMethods: Array<string>;
     AllowedHeaders?: Array<string>;
     ExposedHeaders?: Array<string>;
     MaxAgeInSeconds: number;
+}
+
+export interface IDataHistoryWidgetTimeSeriesTwin {
+    label?: string;
+    twinId: string;
+    twinPropertyName: string;
 }

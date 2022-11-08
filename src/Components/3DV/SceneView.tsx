@@ -1,7 +1,12 @@
 import * as BABYLON from '@babylonjs/core/Legacy/legacy';
 import '@babylonjs/loaders';
 import * as GUI from '@babylonjs/gui';
-import { ProgressIndicator, useTheme } from '@fluentui/react';
+import {
+    MessageBar,
+    MessageBarType,
+    ProgressIndicator,
+    useTheme
+} from '@fluentui/react';
 import React, {
     forwardRef,
     useCallback,
@@ -22,7 +27,10 @@ import {
     ISceneViewProps,
     ColoredMeshGroup,
     Marker,
-    SceneViewCallbackHandler
+    SceneViewCallbackHandler,
+    TransformedElementItem,
+    CustomMeshItem,
+    TransformInfo
 } from '../../Models/Classes/SceneView.types';
 import {
     CameraZoomMultiplier,
@@ -41,7 +49,9 @@ import {
     getBoundingBox,
     getCameraPosition,
     getMarkerPosition,
-    removeGroupedItems
+    removeGroupedItems,
+    transformInfoFromMesh,
+    transformMeshFromTransformInfo
 } from './SceneView.Utils';
 import {
     makeMaterial,
@@ -65,6 +75,7 @@ import { MarkersPlaceholder } from './Internal/MarkersPlaceholder';
 import { Markers } from './Internal/Markers';
 import axios from 'axios';
 import { LoadingErrorMessage } from './Internal/LoadingErrorMessage';
+import { useTranslation } from 'react-i18next';
 
 export const showFpsCounter = false;
 const debugBabylon = false;
@@ -135,18 +146,21 @@ async function loadPromise(
             );
         });
     } catch (e) {
-        console.log(e);
+        console.error(e);
         onError(null, e.message, e);
     }
 }
 
 function SceneView(props: ISceneViewProps, ref) {
     const {
+        allowModelDimensionErrorMessage,
         backgroundColor,
         cameraInteractionType,
         cameraPosition,
         coloredMeshItems,
         getToken,
+        gizmoElementItem,
+        gizmoTransformItem,
         markers,
         modelUrl,
         objectColor,
@@ -156,8 +170,10 @@ function SceneView(props: ISceneViewProps, ref) {
         onMeshHover,
         onSceneLoaded,
         outlinedMeshitems,
+        setGizmoTransformItem,
         showHoverOnSelected,
         showMeshesOnHover,
+        transformedElementItems,
         unzoomedMeshOpacity,
         zoomToMeshIds
     } = props;
@@ -205,10 +221,15 @@ function SceneView(props: ISceneViewProps, ref) {
     const zoomedMeshesRef = useRef([]);
     const lastCameraPositionRef = useRef('');
     const markersRef = useRef<Marker[]>(null);
+    const previouslyTransformedElements = useRef<CustomMeshItem[]>([]);
+    const gizmoManagerRef = useRef<BABYLON.GizmoManager>(undefined);
+    const gizmoTransformItemDraftRef = useRef<TransformedElementItem>(null);
 
     const [markersAndPositions, setMarkersAndPositions] = useState<
         { marker: Marker; left: number; top: number }[]
     >([]);
+
+    const [showModelError, setShowModelError] = useState(false);
 
     const isWireframe = objectStyle === ViewerObjectStyle.Wireframe;
 
@@ -350,6 +371,17 @@ function SceneView(props: ISceneViewProps, ref) {
                     const height = es_scaled.y;
                     const depth = es_scaled.z;
                     const radius = Math.max(width, height, depth);
+
+                    // check if the largest dimension is ALOT larger than the smallest dimension.
+                    // This can be caused by erroneous meshes which need to be fixed in a modelling tool
+                    if (
+                        allowModelDimensionErrorMessage &&
+                        radius > Math.min(width, height, depth) * 1000
+                    ) {
+                        setShowModelError(true);
+                    } else {
+                        setShowModelError(false);
+                    }
 
                     const center = someMeshFromTheArrayOfMeshes.getBoundingInfo()
                         .boundingBox.centerWorld;
@@ -1653,7 +1685,287 @@ function SceneView(props: ISceneViewProps, ref) {
         };
     }, [outlinedMeshitems, meshMap.current]);
 
+    // SETUP LOGIC FOR HANDLING TRANSFORMING MESHES
+    useEffect(() => {
+        debugLog(
+            'debug',
+            'transform meshes based on transformedMeshItems prop' +
+                (scene ? ' with scene' : ' no scene')
+        );
+
+        if (scene && transformedElementItems && !isLoading) {
+            if (debugLogging) {
+                console.time('transforming meshes');
+            }
+            try {
+                // if there is a parent mesh in previouslyTransformedElements BUT NOT in transformedElementItems
+                // (meaning the element had been previously transformed but the transform is now turned off)
+                // reset the element to its original state (which had been preserved in previouslyTransformedElements)
+                // and remove element from previouslyTransformedElements
+
+                // grab all parentMeshIds from the new transformedElementsItems
+                const tEIParentMeshIds = transformedElementItems.map(
+                    (tEI) => tEI.parentMeshId
+                );
+                // iterate through all previously transformed elements
+                previouslyTransformedElements.current.forEach(
+                    (previouslyTransformedElement) => {
+                        // get mesh id for the previously transformed element
+                        const prevTransParentMeshId =
+                            previouslyTransformedElement.meshId;
+                        // if the parentMeshIds to be transformed DOES NOT include the previouslyTransformedParentMeshId,
+                        // then that means the transformation no longer applies and the element should be reset
+                        if (!tEIParentMeshIds.includes(prevTransParentMeshId)) {
+                            const prevTransParentMesh: BABYLON.Mesh =
+                                meshMap.current?.[prevTransParentMeshId];
+                            if (prevTransParentMesh) {
+                                transformMeshFromTransformInfo(
+                                    prevTransParentMesh,
+                                    previouslyTransformedElement.transform
+                                );
+                            }
+
+                            // set up to remove from previouslyTransformedElements
+                            previouslyTransformedElement.meshId = null;
+                        }
+                    }
+                );
+                // remove all elements with parent mesh id of null (aka was already reset)
+                previouslyTransformedElements.current = previouslyTransformedElements.current.filter(
+                    (cPTE) => cPTE.meshId != null
+                );
+
+                transformedElementItems.forEach((transformedElementItem) => {
+                    const meshIds = transformedElementItem.meshIds;
+                    const parentMeshId = transformedElementItem.parentMeshId;
+                    meshIds.forEach((meshId) => {
+                        if (meshId != parentMeshId) {
+                            // set parent of each mesh (that isn't the designated parent) to parent mesh
+                            meshMap.current?.[meshId].setParent(
+                                meshMap.current?.[parentMeshId]
+                            );
+                        }
+                    });
+                    transformMesh(transformedElementItem); // only call transform on parent mesh
+                });
+            } catch {
+                console.warn('unable to transform mesh');
+            }
+            if (debugLogging) {
+                console.timeEnd('transforming meshes');
+            }
+        }
+    }, [transformedElementItems, isLoading]);
+
+    const transformMesh = (transformedElementItem: TransformedElementItem) => {
+        const parentMesh: BABYLON.Mesh =
+            meshMap.current?.[transformedElementItem.parentMeshId];
+        if (!parentMesh) {
+            return;
+        }
+
+        parentMesh.rotationQuaternion = null; // need to do this to change mesh.rotation directly
+
+        const pTParentMeshIds: string[] = previouslyTransformedElements.current.map(
+            (pTE) => pTE.meshId
+        );
+
+        const newTransform = transformedElementItem.transform;
+
+        // only add parentMesh to previouslyTransformedElements ONCE for the ORIGINAL status
+        if (!pTParentMeshIds.includes(transformedElementItem.parentMeshId)) {
+            const originalTransform = transformInfoFromMesh(parentMesh);
+            previouslyTransformedElements.current.push({
+                meshId: transformedElementItem.parentMeshId,
+                transform: originalTransform
+            });
+        }
+
+        // set mesh to new transform
+        transformMeshFromTransformInfo(parentMesh, newTransform);
+    };
+
+    // Handle gizmoElementItem
+    useEffect(() => {
+        debugLog(
+            'debug',
+            'adding gizmo to parent meshes based on gizmoElementItem prop' +
+                (scene ? ' with scene' : ' no scene')
+        );
+
+        if (scene && gizmoElementItem && !isLoading) {
+            if (debugLogging) {
+                console.time('adding gizmo to meshes');
+            }
+            try {
+                // create a gizmoManager if one does not already exist
+                if (!gizmoManagerRef.current) {
+                    gizmoManagerRef.current = new BABYLON.GizmoManager(
+                        scene,
+                        1,
+                        new BABYLON.UtilityLayerRenderer(scene)
+                    );
+                }
+                const gizmoManager = gizmoManagerRef.current;
+
+                // should be triggered upon leaving transforms tab
+                if (!gizmoElementItem?.parentMeshId) {
+                    // attach to null meshes to clear
+                    gizmoManager.attachToMesh(null);
+                    // snap parent mesh back to original state if a gizmoTransformItemDraftRef exists
+                    // probably temporary -- ideally, would want to save transform data with mesh/under behavior
+                    if (gizmoTransformItemDraftRef.current?.parentMeshId) {
+                        const parentMesh: BABYLON.Mesh =
+                            meshMap.current?.[
+                                gizmoTransformItemDraftRef.current.parentMeshId
+                            ];
+                        parentMesh.rotationQuaternion = null;
+                        const originalTransform =
+                            gizmoTransformItemDraftRef.current.original;
+                        transformMeshFromTransformInfo(
+                            parentMesh,
+                            originalTransform
+                        );
+                    }
+                } else {
+                    // later add support for multiple gizmoElementItems?
+                    const parentMesh: BABYLON.Mesh =
+                        meshMap.current?.[gizmoElementItem.parentMeshId];
+                    parentMesh.rotationQuaternion = null;
+                    // setting all other meshes to be children of the parent mesh
+                    // so that the gizmo moves all meshes in element simultaneously
+                    const meshIds = gizmoElementItem.meshIds;
+                    const parentMeshId = gizmoElementItem.parentMeshId;
+                    meshIds.forEach((meshId) => {
+                        if (meshId != parentMeshId) {
+                            meshMap.current?.[meshId].setParent(parentMesh);
+                        }
+                    });
+
+                    gizmoManager.usePointerToAttachGizmos = false;
+                    gizmoManager.attachToMesh(parentMesh);
+                    gizmoManager.rotationGizmoEnabled = true;
+                    gizmoManager.positionGizmoEnabled = true;
+
+                    // to be accessed in updateTransform
+                    let originalTransform: TransformInfo = null;
+
+                    // capture original rotation/position when gizmoManager attaches to mesh
+                    scene.onAfterRenderObservable.addOnce(() => {
+                        const attachedMesh =
+                            gizmoManager.gizmos.rotationGizmo.attachedMesh;
+
+                        // set both original and transform to original state of mesh
+                        originalTransform = transformInfoFromMesh(attachedMesh);
+
+                        // allows transform values to persist clicking to and away from tab
+                        // may need changing if we allow multiple elements in a sceneVisual to be gizmo'd
+                        if (gizmoTransformItemDraftRef.current) {
+                            const transform =
+                                gizmoTransformItemDraftRef.current.transform;
+                            transformMeshFromTransformInfo(
+                                attachedMesh,
+                                transform
+                            );
+                        } else {
+                            gizmoTransformItemDraftRef.current = {
+                                meshIds: deepCopy(meshIds),
+                                parentMeshId: parentMeshId,
+                                original: originalTransform,
+                                transform: originalTransform
+                            };
+                        }
+
+                        setGizmoTransformItem(
+                            gizmoTransformItemDraftRef.current.transform
+                        );
+                    });
+
+                    // on drag end for both position and rotation gizmos, update transform
+                    // updating on every frame is too much for react to handle
+                    const positionGizmo = gizmoManager.gizmos.positionGizmo;
+                    positionGizmo.onDragEndObservable.add(() => {
+                        // update the gizmoTransformItem (allows builder panel to display new position/rotation)
+                        const attachedMesh =
+                            gizmoManager.gizmos.positionGizmo.attachedMesh;
+
+                        // this is the main place where transforms get set, so round here
+                        gizmoTransformItemDraftRef.current.transform.position = {
+                            x: Math.round(attachedMesh.position.x),
+                            y: Math.round(attachedMesh.position.y),
+                            z: Math.round(attachedMesh.position.z)
+                        };
+                        setGizmoTransformItem(
+                            gizmoTransformItemDraftRef.current.transform
+                        );
+                    });
+
+                    const rotationGizmo = gizmoManager.gizmos.rotationGizmo;
+                    rotationGizmo.onDragEndObservable.add(() => {
+                        // update the gizmoTransformItem (allows builder panel to display new position/rotation)
+                        const attachedMesh =
+                            gizmoManager.gizmos.positionGizmo.attachedMesh;
+
+                        // this is the main place where transforms get set, so round here
+                        gizmoTransformItemDraftRef.current.transform.rotation = {
+                            x: Number(attachedMesh.rotation.x.toFixed(2)),
+                            y: Number(attachedMesh.rotation.y.toFixed(2)),
+                            z: Number(attachedMesh.rotation.z.toFixed(2))
+                        };
+                        setGizmoTransformItem(
+                            gizmoTransformItemDraftRef.current.transform
+                        );
+                    });
+                }
+            } catch {
+                console.warn('unable to add gizmo to mesh');
+            }
+            if (debugLogging) {
+                console.timeEnd('adding gizmo to meshes');
+            }
+        }
+
+        return () => {
+            gizmoManagerRef.current?.dispose();
+            gizmoManagerRef.current = null;
+            // only cleanup if exiting edit behavior, not when switching tabs
+            if (!gizmoElementItem) {
+                gizmoTransformItemDraftRef.current = null;
+            }
+            debugLog('debug', 'Mesh gizmo cleanup');
+        };
+    }, [scene, gizmoElementItem, isLoading]);
+
+    // Handle gizmoTransformItem
+    useEffect(() => {
+        if (scene && gizmoTransformItem && !isLoading) {
+            try {
+                if (gizmoTransformItemDraftRef.current) {
+                    gizmoTransformItemDraftRef.current.transform = deepCopy(
+                        gizmoTransformItem
+                    );
+
+                    const parentMesh: BABYLON.Mesh =
+                        meshMap.current?.[
+                            gizmoTransformItemDraftRef.current.parentMeshId
+                        ];
+
+                    // should update element when user inputs value in field
+                    transformMeshFromTransformInfo(
+                        parentMesh,
+                        gizmoTransformItem
+                    );
+                }
+            } catch {
+                console.warn(
+                    'unable to transform element based on change in transform field'
+                );
+            }
+        }
+    }, [scene, gizmoTransformItem, isLoading]);
+
     const theme = useTheme();
+    const { t } = useTranslation();
     const customStyles = getSceneViewStyles(theme);
     return (
         <div className={customStyles.root}>
@@ -1683,6 +1995,19 @@ function SceneView(props: ISceneViewProps, ref) {
                 </div>
             )}
             <MarkersPlaceholder markers={markers} />
+            {showModelError && (
+                <div className={customStyles.modelErrorMessage}>
+                    <MessageBar
+                        onDismiss={() => setShowModelError(false)}
+                        isMultiline={false}
+                        messageBarType={MessageBarType.warning}
+                    >
+                        {t(
+                            'scenePageErrorHandling.sceneView.3dAssetDimensionError'
+                        )}
+                    </MessageBar>
+                </div>
+            )}
         </div>
     );
 }

@@ -13,17 +13,21 @@ import {
     defaultElementTwinAlias,
     IElementTwinAliasItem
 } from '../../../../../Models/Classes/3DVConfig';
-import { TwinAliasFormMode } from '../../../../../Models/Constants';
+import {
+    DTID_PROPERTY_NAME,
+    TwinAliasFormMode
+} from '../../../../../Models/Constants';
+import { useElementFormContext } from '../../../../../Models/Context/ElementsFormContext/ElementFormContext';
+import { ElementFormContextActionType } from '../../../../../Models/Context/ElementsFormContext/ElementFormContext.types';
 import TooltipCallout from '../../../../TooltipCallout/TooltipCallout';
-import TwinSearchDropdown from '../../../../TwinSearchDropdown/TwinSearchDropdown';
+import TwinPropertySearchDropdown from '../../../../TwinPropertySearchDropdown/TwinPropertySearchDropdown';
 import { SceneBuilderContext } from '../../../ADT3DSceneBuilder';
-import { ElementFormContext } from '../../Elements/ElementForm';
 import PanelFooter from '../../Shared/PanelFooter';
 import { getPanelFormStyles } from '../../Shared/PanelForms.styles';
 
 const ElementTwinAliasForm: React.FC = () => {
     const { t } = useTranslation();
-    const { setElementToEdit } = useContext(ElementFormContext);
+    const { elementFormDispatch } = useElementFormContext();
     const {
         adapter,
         elementTwinAliasFormInfo,
@@ -50,19 +54,21 @@ const ElementTwinAliasForm: React.FC = () => {
 
     const onSaveTwinAliasForm = useCallback(() => {
         if (elementTwinAliasFormInfo.mode === TwinAliasFormMode.EditTwinAlias) {
-            setElementToEdit(
-                produce((draft) => {
-                    draft.twinAliases[formData.alias] = formData.twinId;
-                })
-            );
+            elementFormDispatch({
+                type: ElementFormContextActionType.FORM_ELEMENT_TWIN_ALIAS_ADD,
+                payload: {
+                    aliasName: formData.alias,
+                    aliasTarget: formData.twinId
+                }
+            });
         }
         setElementTwinAliasFormInfo(null);
         setFormData(null);
     }, [
+        elementFormDispatch,
         elementTwinAliasFormInfo.mode,
         formData.alias,
         formData.twinId,
-        setElementToEdit,
         setElementTwinAliasFormInfo
     ]);
 
@@ -126,16 +132,17 @@ const ElementTwinAliasForm: React.FC = () => {
                         }
                     }}
                 />
-                <TwinSearchDropdown
+                <TwinPropertySearchDropdown
                     key={'aliased-twin'}
-                    styles={{ paddingTop: 16 }}
                     adapter={adapter}
                     label={t('twinId')}
                     labelIconName="Shapes"
-                    selectedTwinId={formData.twinId}
-                    onTwinIdSelect={(selectedTwinId: string) => {
+                    onChange={(selectedTwinId: string) => {
                         handleTwinSelect(selectedTwinId);
                     }}
+                    initialSelectedValue={formData.twinId}
+                    searchPropertyName={DTID_PROPERTY_NAME}
+                    styles={{ root: { paddingTop: 16 } }}
                 />
             </div>
             <PanelFooter>

@@ -1,40 +1,33 @@
 import {
-    EventTelemetry,
-    ExceptionTelemetry,
-    RequestTelemetry,
-    TraceTelemetry
+    TelemetryEvent,
+    TelemetryException,
+    TelemetryMetric,
+    TelemetryRequest,
+    TelemetryTrace
 } from '../Services/TelemetryService/Telemetry';
 import TelemetryService from '../Services/TelemetryService/TelemetryService';
 import {
-    IBaseTelemetryParams,
+    IEventTelemetryParams,
     IExceptionTelemetryParams,
+    IMetricTelemetryParams,
     IRequestTelemetryParams,
     ITraceTelemetryParams
 } from '../Services/TelemetryService/TelemetryService.types';
 
 const useTelemetry = () => {
     return {
-        sendTelemetry: TelemetryService.sendTelemetry,
-        sendRequestTelemetry: (
-            requestTelemetryParams: IRequestTelemetryParams
-        ) =>
-            TelemetryService.sendTelemetry(
-                new RequestTelemetry(requestTelemetryParams)
+        sendRequestTelemetry: (telemetryParams: IRequestTelemetryParams) =>
+            TelemetryService.sendRequest(new TelemetryRequest(telemetryParams)),
+        sendExceptionTelemetry: (telemetryParams: IExceptionTelemetryParams) =>
+            TelemetryService.sendException(
+                new TelemetryException(telemetryParams)
             ),
-        sendExceptionTelemetry: (
-            exceptionTelemetryParams: IExceptionTelemetryParams
-        ) =>
-            TelemetryService.sendTelemetry(
-                new ExceptionTelemetry(exceptionTelemetryParams)
-            ),
-        sendTraceTelemetry: (traceTelemetryParams: ITraceTelemetryParams) =>
-            TelemetryService.sendTelemetry(
-                new TraceTelemetry(traceTelemetryParams)
-            ),
-        sendEventTelemetry: (eventTelemetryParams: IBaseTelemetryParams) =>
-            TelemetryService.sendTelemetry(
-                new EventTelemetry(eventTelemetryParams)
-            )
+        sendTraceTelemetry: (telemetryParams: ITraceTelemetryParams) =>
+            TelemetryService.sendTrace(new TelemetryTrace(telemetryParams)),
+        sendEventTelemetry: (telemetryParams: IEventTelemetryParams) =>
+            TelemetryService.sendEvent(new TelemetryEvent(telemetryParams)),
+        sendMetricTelemetry: (telemetryParams: IMetricTelemetryParams) =>
+            TelemetryService.sendMetric(new TelemetryMetric(telemetryParams))
     };
 };
 

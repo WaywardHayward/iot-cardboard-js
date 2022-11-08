@@ -33,7 +33,8 @@ import {
     IADTModel,
     modelRefreshMaxAge,
     twinRefreshMaxAge,
-    instancesRefreshMaxAge
+    AdapterMethodParamsForSearchTwinsByQuery,
+    AdapterMethodParamsForGetTwinsByQuery
 } from '../Models/Constants';
 import ADTTwinData from '../Models/Classes/AdapterDataClasses/ADTTwinData';
 import ADTModelData, {
@@ -41,6 +42,7 @@ import ADTModelData, {
     ADTTwinToModelMappingData
 } from '../Models/Classes/AdapterDataClasses/ADTModelData';
 import {
+    ADTAdapterSearchByQueryData,
     ADTAdapterModelsData,
     ADTAdapterPatchData,
     ADTAdapterTwinsData
@@ -67,7 +69,6 @@ import ViewerConfigUtility from '../Models/Classes/ViewerConfigUtility';
 import { I3DScenesConfig } from '../Models/Types/Generated/3DScenesConfiguration-v1.0.0';
 import { ModelDict } from 'azure-iot-dtdl-parser/dist/parser/modelDict';
 import AdapterEntityCache from '../Models/Classes/AdapterEntityCache';
-import ADTInstancesData from '../Models/Classes/AdapterDataClasses/ADTInstancesData';
 import queryString from 'query-string';
 
 const debugLogging = false;
@@ -87,7 +88,6 @@ export default class ADTAdapter implements IADTAdapter {
     protected adtTwinCache: AdapterEntityCache<ADTTwinData>;
     protected adtModelsCache: AdapterEntityCache<ADTAllModelsData>;
     protected adtTwinToModelMappingCache: AdapterEntityCache<ADTTwinToModelMappingData>;
-    protected adtInstancesCache: AdapterEntityCache<ADTInstancesData>;
 
     constructor(
         adtHostUrl: string,
@@ -96,7 +96,7 @@ export default class ADTAdapter implements IADTAdapter {
         uniqueObjectId?: string,
         adtProxyServerPath = '/proxy/adt'
     ) {
-        this.adtHostUrl = adtHostUrl;
+        this.setAdtHostUrl(adtHostUrl); // this should be the host name of the instace
         this.adtProxyServerPath = adtProxyServerPath;
         this.authService = authService;
         this.tenantId = tenantId;
@@ -111,9 +111,6 @@ export default class ADTAdapter implements IADTAdapter {
         this.adtTwinToModelMappingCache = new AdapterEntityCache<ADTTwinToModelMappingData>(
             modelRefreshMaxAge
         );
-        this.adtInstancesCache = new AdapterEntityCache<ADTInstancesData>(
-            instancesRefreshMaxAge
-        );
 
         this.authService.login();
         this.axiosInstance = axios.create({ baseURL: this.adtProxyServerPath });
@@ -126,7 +123,6 @@ export default class ADTAdapter implements IADTAdapter {
                 );
             },
             retryDelay: (retryCount) => {
-                console.log((Math.pow(2, retryCount) - Math.random()) * 1000);
                 return (Math.pow(2, retryCount) - Math.random()) * 1000;
             }
         });
@@ -137,6 +133,9 @@ export default class ADTAdapter implements IADTAdapter {
     }
 
     setAdtHostUrl(hostName: string) {
+        if (hostName.startsWith('https://')) {
+            hostName = hostName.replace('https://', '');
+        }
         this.adtHostUrl = hostName;
     }
 
@@ -180,7 +179,7 @@ export default class ADTAdapter implements IADTAdapter {
         );
     }
 
-    getADTTwin(twinId: string, useCache = false) {
+    getADTTwin(twinId: string, useCache = false, forceRefresh = false) {
         const adapterMethodSandbox = new AdapterMethodSandbox(this.authService);
         const getDataMethod = () =>
             adapterMethodSandbox.safelyFetchDataCancellableAxiosPromise(
@@ -199,7 +198,11 @@ export default class ADTAdapter implements IADTAdapter {
                 }
             );
         if (useCache) {
-            return this.adtTwinCache.getEntity(twinId, getDataMethod);
+            return this.adtTwinCache.getEntity(
+                twinId,
+                getDataMethod,
+                forceRefresh
+            );
         } else {
             return getDataMethod();
         }
@@ -266,7 +269,7 @@ export default class ADTAdapter implements IADTAdapter {
                                 ).continuationToken as string;
                                 await appendModels(continuationToken);
                             } catch (e) {
-                                console.log(
+                                console.error(
                                     'Continuation token for models call unsuccessfully parsed',
                                     e
                                 );
@@ -459,11 +462,84 @@ export default class ADTAdapter implements IADTAdapter {
                         params.shouldSearchByModel
                             ? `CONTAINS(T.$metadata.$model, '${params.searchTerm}') OR `
                             : ''
-                    }CONTAINS(T.$dtId, '${params.searchTerm}')`,
+                    }CONTAINS(T.${params.searchProperty}, '${
+                        params.searchTerm
+                    }')`,
                     continuationToken: params.continuationToken
                 }
             }
         );
+    }
+
+    async getTwinsByQuery(
+        params: AdapterMethodParamsForGetTwinsByQuery = null
+    ) {
+        const adapterMethodSandbox = new AdapterMethodSandbox(this.authService);
+        return adapterMethodSandbox.safelyFetchDataCancellableAxiosPromise(
+            ADTAdapterSearchByQueryData,
+            {
+                method: 'post',
+                url: `${this.adtProxyServerPath}/query`,
+                headers: {
+                    'x-adt-host': this.adtHostUrl
+                },
+                params: {
+                    'api-version': ADT_ApiVersion
+                },
+                data: {
+                    query: params.query,
+                    continuationToken: params.continuationToken
+                }
+            }
+        );
+    }
+
+    async searchTwinsByQuery(params: AdapterMethodParamsForSearchTwinsByQuery) {
+        const adapterMethodSandbox = new AdapterMethodSandbox(this.authService);
+        const getDataMethod = () =>
+            adapterMethodSandbox.safelyFetchData(async () => {
+                try {
+                    let twins: IADTTwin[] = [];
+                    const appendTwins = async (continuationToken?: string) => {
+                        // Get next chunk of twins
+                        const adtTwinsApiData = await this.getTwinsByQuery({
+                            query: params.query,
+                            continuationToken: continuationToken
+                        });
+
+                        // Add twins to list
+                        twins = twins.concat(adtTwinsApiData.result.data.value);
+
+                        // If next link present, fetch next chunk
+                        if (adtTwinsApiData.result.data.continuationToken) {
+                            try {
+                                await appendTwins(
+                                    adtTwinsApiData.result.data
+                                        .continuationToken
+                                );
+                            } catch (e) {
+                                console.error(
+                                    'Continuation token for twins call not valid',
+                                    e
+                                );
+                            }
+                        }
+                    };
+
+                    await appendTwins();
+
+                    return new ADTAdapterSearchByQueryData({
+                        value: twins
+                    });
+                } catch (err) {
+                    adapterMethodSandbox.pushError({
+                        type: ComponentErrorType.TwinsRetrievalFailed,
+                        isCatastrophic: true,
+                        rawError: err
+                    });
+                }
+            });
+        return await getDataMethod();
     }
 
     async createModels(models: DTModel[]) {
@@ -935,12 +1011,19 @@ export default class ADTAdapter implements IADTAdapter {
         );
     }
 
-    async getSceneData(sceneId: string, config: I3DScenesConfig) {
+    async getSceneData(
+        sceneId: string,
+        config: I3DScenesConfig,
+        visibleLayerIds?: string[],
+        bustCache?: boolean
+    ) {
         logDebugConsole(
             'info',
-            '[START] Fetching scene data {sceneId, config}',
+            '[START] Fetching scene data {sceneId, config, visibleLayers, bustCache}',
             sceneId,
-            config
+            config,
+            visibleLayerIds,
+            bustCache
         );
         const adapterMethodSandbox = new AdapterMethodSandbox(this.authService);
 
@@ -977,13 +1060,30 @@ export default class ADTAdapter implements IADTAdapter {
 
                 if (scene.behaviorIDs) {
                     // get all twins for all behaviors in the scene
-                    for (const sceneBehaviorId of scene.behaviorIDs) {
+                    for (const behaviorId of scene.behaviorIDs) {
                         const behavior = ViewerConfigUtility.getBehaviorById(
                             config,
-                            sceneBehaviorId
+                            behaviorId
                         );
-                        if (!behavior) {
-                            // skip if we don't find the behavior
+
+                        // skip if we don't find the behavior OR if it's not in a visible layer
+                        const behaviorIdsInSelectedLayers = ViewerConfigUtility.getBehaviorIdsInSelectedLayers(
+                            config,
+                            visibleLayerIds,
+                            sceneId
+                        );
+                        if (
+                            !behavior ||
+                            (visibleLayerIds &&
+                                behaviorIdsInSelectedLayers &&
+                                !behaviorIdsInSelectedLayers.includes(
+                                    behaviorId
+                                ))
+                        ) {
+                            logDebugConsole(
+                                'debug',
+                                `Not refreshing twins for behavior (id: ${behavior.id}, name: ${behavior.displayName}) that is not in the selected layers`
+                            );
                             continue;
                         }
                         const {
@@ -1013,7 +1113,7 @@ export default class ADTAdapter implements IADTAdapter {
                     );
                     const twinResults = await Promise.all(
                         twinIdsArray.map((twinId) =>
-                            this.getADTTwin(twinId, true)
+                            this.getADTTwin(twinId, true, bustCache)
                         )
                     );
                     logDebugConsole(

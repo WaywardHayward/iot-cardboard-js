@@ -4,9 +4,10 @@ import {
     DTwinRelationship,
     IADTAdapter,
     IKeyValuePairAdapter,
-    IAzureResourceGroup,
     ITsiClientChartDataAdapter,
-    AzureAccessPermissionRoles
+    AzureAccessPermissionRoles,
+    AzureResourceTypes,
+    ADXTableColumns
 } from '.';
 import AdapterResult from '../Classes/AdapterResult';
 import {
@@ -70,6 +71,21 @@ export type ADTRelationship = {
 
 export type TsiClientData = any[];
 
+export type ADXTimeSeriesTableRow = {
+    timestamp: string;
+    id: string;
+    key: string;
+    value: number;
+};
+
+export type TimeSeriesData = { timestamp: string | number; value: number };
+
+export type ADXTimeSeries = {
+    id: string;
+    key: string;
+    data: Array<TimeSeriesData>;
+};
+
 export type HierarchyData = Record<string, IHierarchyNode>;
 
 export type ADTModelsApiData = {
@@ -120,8 +136,18 @@ export type AdapterMethodParamsForGetADTTwinsByModelId = {
 };
 
 export type AdapterMethodParamsForSearchADTTwins = {
+    searchProperty: string;
     searchTerm: string;
     shouldSearchByModel: boolean;
+    continuationToken?: string;
+};
+
+export type AdapterMethodParamsForSearchTwinsByQuery = {
+    query: string;
+};
+
+export type AdapterMethodParamsForGetTwinsByQuery = {
+    query: string;
     continuationToken?: string;
 };
 
@@ -155,8 +181,10 @@ export type CardboardIconNames =
     | 'CubeShape'
     | 'Database'
     | 'Delete'
+    | 'DeveloperTools'
     | 'Design'
     | 'Edit'
+    | 'EntryView'
     | 'Home'
     | 'Info'
     | 'Link'
@@ -164,12 +192,23 @@ export type CardboardIconNames =
     | 'MapLayers'
     | 'MoreVertical'
     | 'MultiSelect'
+    | 'NumberField'
     | 'Org'
     | 'ProductVariant'
     | 'Ringer'
+    | 'Search'
     | 'Shapes'
     | 'SpeedHigh'
     | 'View';
+
+export enum DurationUnits {
+    milliseconds = 0,
+    seconds = 1,
+    minutes = 2,
+    hours = 3,
+    days = 4,
+    years = 5
+}
 
 export type IConsoleLogFunction = (
     level: 'debug' | 'info' | 'warn' | 'error',
@@ -177,12 +216,68 @@ export type IConsoleLogFunction = (
     ...args: unknown[]
 ) => void;
 
-export type AzureResourceGroupsApiData = {
-    value: IAzureResourceGroup[];
-    nextLink: string;
+export type AzureAccessPermissionRoleGroups = {
+    enforced: Array<AzureAccessPermissionRoles>; // roles must exist/required (and)
+    interchangeables: Array<Array<AzureAccessPermissionRoles>>; // within each group one or the other role has to exist (either/or)
 };
 
-export type MissingAzureRoleDefinitionAssignments = {
-    enforced?: Array<AzureAccessPermissionRoles>;
-    alternated?: Array<AzureAccessPermissionRoles>;
+/** AdapterMethodParamsForGetAzureResources is used for setting the paramter for the getResources method in AzureManagementAdapter
+ * @param resourceType set the type to get the resources of that type
+ * @param searchParams parameters used for get resources requests agains the management API
+ * @param resourceProviderEndpoint if provided, the Azure Management API is going to only make call against this provider endpoint, otherwise will use predefined mapping based on passed resource type
+ * @param userData used for making requests against management API for getting subscriptions or checking role assignments for the logged in user
+ */
+export type AdapterMethodParamsForGetAzureResources = {
+    resourceType: AzureResourceTypes;
+    searchParams?: AzureResourceSearchParams;
+    resourceProviderEndpoint?: string;
+    userData?: {
+        tenantId: string;
+        uniqueObjectId: string;
+    };
+};
+
+/** AzureResourceSearchParams is used for handling get resources requests in resource picker component.
+ * @param take the number of resources to return to limit the number of following requests to check the permission against, but drawback of this approach is that the taken bucket of resources may not be the ones that user has required permissions
+ * @param filter used to filter resources based on AzureResourceDisplayFields
+ * @param additionalParams is for resource specific params (e.g storageAccountId for fetching StorageBlobContainer resource type) to limit the number of requests for performance
+ */
+export type AzureResourceSearchParams = {
+    take?: number;
+    filter?: string;
+    additionalParams?: {
+        storageAccountId?: string;
+        [key: string]: any;
+    };
+};
+
+/** Used to identify an ADT instance by its id
+ * @param id the resource id of the ADT instance
+ */
+export type ADTResourceIdentifierWithId = {
+    id: string;
+};
+
+/** Used to identify an ADT instance by its hostName
+ * @param hostName the hostName of the ADT instance
+ */
+export type ADTResourceIdentifierWithHostname = {
+    hostName: string;
+};
+
+/** An identifier for an ADT instance, either id of hostName of the resource
+ */
+export type ADTResourceIdentifier =
+    | ADTResourceIdentifierWithId
+    | ADTResourceIdentifierWithHostname;
+
+export type ADXTable = {
+    Rows: Array<Array<string | number>>;
+    Columns: Array<{
+        ColumnName: ADXTableColumns;
+        ColumnType: 'string' | 'datetime' | 'dynamic';
+    }>;
+    FrameType: 'DataTable';
+    TableKind: 'PrimaryResult';
+    [additionalProperty: string]: any;
 };

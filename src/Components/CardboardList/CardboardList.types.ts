@@ -18,6 +18,7 @@ type IListItemBaseProps<T> = {
      */
     buttonProps?: Omit<
         IButtonProps,
+        | 'id'
         | 'styles'
         | 'onClick'
         | 'onKeyPress'
@@ -27,18 +28,29 @@ type IListItemBaseProps<T> = {
         customStyles?: IButtonStyles;
     };
     /** icon to render on the right side of the list item */
-    iconEnd?: {
-        name: IIconNames;
-        onClick?: (item: T) => void;
-    };
+    iconEnd?:
+        | {
+              name: IIconNames;
+              onClick?: (item: T) => void;
+          }
+        | ((item: T) => React.ReactElement);
     /** icon or JSX element to render at the left side of the list item */
-    iconStart?: {
-        name: IIconNames | JSX.Element;
-    };
+    iconStart?:
+        | {
+              name: IIconNames;
+          }
+        | ((item: T) => React.ReactElement);
+    /** id attribute to attach to the list item button */
+    id?: string;
     /** if provided false will result in rendering the red dot at the very left of the element. If not provided, will assume it is valid and not render any dot */
     isValid?: boolean;
     /** if provided will result in rendering the checkbox in either checked or unchecked state. If not provided, will not render a checkbox */
     isChecked?: boolean;
+    /**
+     * if provided, will style the item as being selected. This will not show the checkbox.
+     * NOTE: Should not be combined with `isChecked`. They should be mutually exclusive
+     */
+    isSelected?: boolean;
     /** the original item to provide back to callbacks */
     item: T;
     /** type of item when rendering a grouped list. Headers have dividers and items have indentation */

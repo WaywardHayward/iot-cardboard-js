@@ -4,7 +4,7 @@ This class intercepts calls to the SceneViewer and enables AddIns to hook into e
 
 */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 import * as BABYLON from '@babylonjs/core/Legacy/legacy';
 import { ICameraPosition } from '../../Models/Classes/SceneView.types';
 import SceneView, { showFpsCounter } from './SceneView';
@@ -31,9 +31,9 @@ import {
     ISceneViewWrapperStyleProps,
     ISceneViewWrapperStyles
 } from './SceneViewWrapper.types';
-import SceneThemePicker from '../ModelViewerModePicker/SceneThemePicker';
 import { useSceneThemeContext } from '../../Models/Context/SceneThemeContext/SceneThemeContext';
 import { WrapperMode } from './SceneView.types';
+import { SceneViewContext } from '../../Models/Context/SceneViewContext/SceneViewContext';
 
 const getClassNames = classNamesFunction<
     ISceneViewWrapperStyleProps,
@@ -45,7 +45,6 @@ const SceneViewWrapper: React.FC<ISceneViewWrapperProps> = (props) => {
         adapter,
         addInProps,
         config,
-        hideViewModePickerUI,
         objectColorUpdated,
         sceneId,
         sceneViewProps,
@@ -73,6 +72,7 @@ const SceneViewWrapper: React.FC<ISceneViewWrapperProps> = (props) => {
     const classNames = getClassNames(styles, { theme, mode: wrapperMode });
 
     const { sceneThemeState } = useSceneThemeContext();
+    const { sceneViewState } = useContext(SceneViewContext);
 
     // notify consumer of the change
     useEffect(() => {
@@ -185,6 +185,7 @@ const SceneViewWrapper: React.FC<ISceneViewWrapperProps> = (props) => {
                 objectStyle={sceneThemeState.objectStyle}
                 onCameraMove={addInProps?.onCameraMove ? cameraMove : undefined}
                 {...svp}
+                outlinedMeshitems={sceneViewState.outlinedMeshItems}
                 cameraInteractionType={cameraInteractionType}
                 onMeshClick={meshClick}
                 onMeshHover={meshHover}
@@ -211,12 +212,6 @@ const SceneViewWrapper: React.FC<ISceneViewWrapperProps> = (props) => {
                         )
                     }
                 />
-            </Stack>
-            <Stack
-                horizontal
-                styles={classNames.subComponentStyles.rightHeaderControlsStack}
-            >
-                {!hideViewModePickerUI && <SceneThemePicker />}
             </Stack>
         </div>
     );

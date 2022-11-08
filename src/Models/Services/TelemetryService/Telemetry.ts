@@ -1,26 +1,30 @@
+import { CUSTOM_PROPERTY_NAMES } from '../../Constants/TelemetryConstants';
 import {
     CustomProperties,
-    IBaseTelemetryParams,
+    IEventTelemetryParams,
     IExceptionTelemetryParams,
+    IMetricTelemetryParams,
     IRequestTelemetryParams,
     ITraceTelemetryParams,
     SeverityLevel,
     TelemetryType
 } from './TelemetryService.types';
 
+export type TelemetryItem =
+    | TelemetryEvent
+    | TelemetryException
+    | TelemetryMetric
+    | TelemetryRequest
+    | TelemetryTrace;
+
 export abstract class Telemetry {
     name: string;
     type: TelemetryType;
     customProperties: CustomProperties;
     timestamp: string;
-    constructor(
-        name: string,
-        type: TelemetryType,
-        customProperties: CustomProperties
-    ) {
+    constructor(name: string, customProperties: CustomProperties) {
         this.name = name;
-        this.type = type;
-        this.customProperties = customProperties;
+        this.customProperties = customProperties || {};
         this.timestamp = new Date().toUTCString();
     }
 }
@@ -28,7 +32,8 @@ export abstract class Telemetry {
 /** Telemetry for network requests
  * https://docs.microsoft.com/en-us/azure/azure-monitor/app/data-model-request-telemetry
  */
-export class RequestTelemetry extends Telemetry {
+export class TelemetryRequest extends Telemetry {
+    type: TelemetryType.request;
     name: string;
     url: string;
     success: boolean;
@@ -45,7 +50,8 @@ export class RequestTelemetry extends Telemetry {
         success,
         customProperties
     }: IRequestTelemetryParams) {
-        super(name, TelemetryType.request, customProperties);
+        super(name, customProperties);
+        this.type = TelemetryType.request;
         this.url = url;
         this.success = success;
         this.responseCode = responseCode;
@@ -58,7 +64,8 @@ export class RequestTelemetry extends Telemetry {
 /** Telemetry for exceptions
  * https://docs.microsoft.com/en-us/azure/azure-monitor/app/data-model-exception-telemetry
  */
-export class ExceptionTelemetry extends Telemetry {
+export class TelemetryException extends Telemetry {
+    type: TelemetryType.exception;
     exceptionId: string;
     severityLevel: SeverityLevel;
     message: string;
@@ -72,7 +79,8 @@ export class ExceptionTelemetry extends Telemetry {
         customProperties,
         severityLevel
     }: IExceptionTelemetryParams) {
-        super(name, TelemetryType.exception, customProperties);
+        super(name, customProperties);
+        this.type = TelemetryType.exception;
         this.exceptionId = exceptionId;
         this.severityLevel = severityLevel;
         this.message = message;
@@ -83,7 +91,8 @@ export class ExceptionTelemetry extends Telemetry {
 /** Telemetry for trace statements (similar to log entries)
  * https://docs.microsoft.com/en-us/azure/azure-monitor/app/data-model-trace-telemetry
  */
-export class TraceTelemetry extends Telemetry {
+export class TelemetryTrace extends Telemetry {
+    type: TelemetryType.trace;
     message: string;
     severityLevel: SeverityLevel;
 
@@ -93,7 +102,8 @@ export class TraceTelemetry extends Telemetry {
         severityLevel,
         customProperties
     }: ITraceTelemetryParams) {
-        super(name, TelemetryType.trace, customProperties);
+        super(name, customProperties);
+        this.type = TelemetryType.trace;
         this.message = message;
         this.severityLevel = severityLevel;
     }
@@ -102,8 +112,48 @@ export class TraceTelemetry extends Telemetry {
 /** Telemetry for application events (Typically it is a user interaction such as button click)
  * https://docs.microsoft.com/en-us/azure/azure-monitor/app/data-model-event-telemetry
  */
-export class EventTelemetry extends Telemetry {
-    constructor({ name, customProperties }: IBaseTelemetryParams) {
-        super(name, TelemetryType.trace, customProperties);
+export class TelemetryEvent extends Telemetry {
+    type: TelemetryType.event;
+    constructor({
+        appRegion,
+        componentName,
+        customProperties,
+        name,
+        triggerType
+    }: IEventTelemetryParams) {
+        super(name, customProperties);
+        this.type = TelemetryType.event;
+        this.customProperties = {
+            ...this.customProperties,
+            [CUSTOM_PROPERTY_NAMES.AppRegion]: appRegion || 'Unset',
+            [CUSTOM_PROPERTY_NAMES.ComponentName]: componentName || 'Unset',
+            [CUSTOM_PROPERTY_NAMES.TriggerType]: triggerType || 'Unset'
+        };
+    }
+}
+
+/** Telemetry for application measurements (Typically it is a state of the app like queue length, or duration something took to complete)
+ * https://docs.microsoft.com/en-us/azure/azure-monitor/app/data-model-metric-telemetry
+ */
+export class TelemetryMetric extends Telemetry {
+    type: TelemetryType.metric;
+    average: number;
+    min?: number;
+    max?: number;
+    sampleSize?: number;
+    constructor({
+        name,
+        average,
+        min,
+        max,
+        sampleSize,
+        customProperties
+    }: IMetricTelemetryParams) {
+        super(name, customProperties);
+        this.type = TelemetryType.metric;
+        this.average = average;
+        this.min = min;
+        this.max = max;
+        this.sampleSize = sampleSize || 1;
     }
 }

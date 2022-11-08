@@ -1,17 +1,14 @@
 import * as BABYLON from '@babylonjs/core/Legacy/legacy';
 import React from 'react';
+import { DtdlInterface, DtdlProperty } from '../Constants/dtdlInterfaces';
 import {
-    IADTTwin,
-    ADTModel_ViewData_PropertyName,
     ADTModel_ImgPropertyPositions_PropertyName,
     ADTModel_ImgSrc_PropertyName,
     ADTModel_InBIM_RelationshipName,
-    ComponentErrorType,
-    DTwin,
-    IConsoleLogFunction
-} from '../Constants';
-import { DtdlInterface, DtdlProperty } from '../Constants/dtdlInterfaces';
-import { CharacterWidths } from '../Constants/Constants';
+    ADTModel_ViewData_PropertyName,
+    CharacterWidths,
+    CONNECTION_STRING_SUFFIX
+} from '../Constants/Constants';
 import { Parser } from 'expr-eval';
 import Ajv from 'ajv/dist/2020';
 import schema from '../../../schemas/3DScenesConfiguration/v1.0.0/3DScenesConfiguration.schema.json';
@@ -21,9 +18,24 @@ import {
     IValueRange
 } from '../Types/Generated/3DScenesConfiguration-v1.0.0';
 import ViewerConfigUtility from '../Classes/ViewerConfigUtility';
-import { createParser, ModelParsingOption } from 'azure-iot-dtdl-parser';
 import { IDropdownOption } from '@fluentui/react';
+import { createParser, ModelParsingOption } from 'azure-iot-dtdl-parser';
 import { isConstant, toConstant } from 'constantinople';
+import { v4 } from 'uuid';
+import TreeMap from 'ts-treemap';
+import {
+    AzureAccessPermissionRoles,
+    AzureResourceDisplayFields,
+    AzureResourceTypes,
+    ComponentErrorType
+} from '../Constants/Enums';
+import { DTwin, IADTTwin, IAzureResource } from '../Constants/Interfaces';
+import {
+    AzureAccessPermissionRoleGroups,
+    DurationUnits,
+    IConsoleLogFunction,
+    TimeSeriesData
+} from '../Constants/Types';
 
 let ajv: Ajv = null;
 const parser = createParser(ModelParsingOption.PermitAnyTopLevelElement);
@@ -55,14 +67,11 @@ export const validate3DConfigWithSchema = (
 };
 
 export const createGUID = (isWithDashes = false) => {
-    const s4 = () => {
-        return Math.floor((1 + Math.random()) * 0x10000)
-            .toString(16)
-            .substring(1);
-    };
-    return isWithDashes
-        ? `${s4()}${s4()}-${s4()}-${s4()}-${s4()}-${s4()}${s4()}${s4()}`
-        : `${s4()}${s4()}${s4()}${s4()}${s4()}${s4()}${s4()}${s4()}`;
+    let id: string = v4();
+    if (!isWithDashes) {
+        id = id.replace(/-/g, '');
+    }
+    return id;
 };
 
 export const getFileType = (fileName: string, defaultType = '') => {
@@ -227,12 +236,63 @@ export function getTimeStamp() {
     return timeStamp;
 }
 
+/**
+ * Takes in a duration in milliseconds and returns and object that has the value converted to the best units to describe that duration (ex: seconds, minutes, hours, days, years).
+ * @param milliseconds millisecond duration to convert
+ * @returns an object containing the scaled version and the locale resource key for the units, NOTE: the resource key expects the value to be passed in as an argument to populate the value ex: `t(formattedTime.displayStringKey, {value: formattedTime.value})`
+ */
+export function formatTimeInRelevantUnits(
+    milliseconds: number,
+    minimumUnits: DurationUnits = DurationUnits.milliseconds
+): { value: number; displayStringKey: string } {
+    const DEFAULT_RESULT = {
+        value: 0,
+        displayStringKey: 'duration.seconds'
+    };
+    if (!milliseconds || milliseconds < 1) {
+        return DEFAULT_RESULT;
+    }
+    const timeUnits = new TreeMap<number, string>();
+    minimumUnits <= DurationUnits.milliseconds &&
+        timeUnits.set(1, 'duration.millisecond');
+    minimumUnits <= DurationUnits.seconds &&
+        timeUnits.set(1000, 'duration.second');
+    minimumUnits <= DurationUnits.minutes &&
+        timeUnits.set(60 * 1000, 'duration.minute');
+    minimumUnits <= DurationUnits.hours &&
+        timeUnits.set(60 * 60 * 1000, 'duration.hour');
+    minimumUnits <= DurationUnits.days &&
+        timeUnits.set(24 * 60 * 60 * 1000, 'duration.day');
+    minimumUnits <= DurationUnits.years &&
+        timeUnits.set(365 * 24 * 60 * 60 * 1000, 'duration.year');
+
+    // get the next entry below, if there isn't one, get the next one larger
+    let unitBelow = timeUnits.floorEntry(milliseconds);
+    let value = 0;
+
+    if (!unitBelow) {
+        unitBelow = timeUnits.higherEntry(milliseconds);
+    } else {
+        value = milliseconds / unitBelow[0];
+    }
+
+    let units = unitBelow[1];
+    // make the key plural if it's != 1
+    if (Math.round(value) != 1) {
+        units += 's';
+    }
+    return {
+        value: value,
+        displayStringKey: units
+    };
+}
+
 export function parseExpression(expression: string, twins: any) {
     let result: any = '';
     try {
         result = Parser.evaluate(expression, twins) as any;
     } catch {
-        console.log(`Unable to parse expression: ${expression}`);
+        console.error(`Unable to parse expression: ${expression}`);
     }
 
     return result;
@@ -341,7 +401,7 @@ export function parseLinkedTwinExpression(
             result = toConstant(expression, { ...twins, Math: Math });
         }
     } catch (err) {
-        console.log(`${expression} - could not be parsed into constant`);
+        console.error(`${expression} - could not be parsed into constant`);
     }
 
     return result;
@@ -381,32 +441,64 @@ export function rgbToHex(r, g, b) {
     return '#' + componentToHex(r) + componentToHex(g) + componentToHex(b);
 }
 
-export function addHttpsPrefix(url: string) {
-    if (url?.startsWith('https://')) {
-        // if it's got the prefix, don't add anything
-        return url;
-    } else if (url) {
-        // if we have a value, add the prefix
-        return 'https://' + url;
-    } else {
-        // if we didn't get anything, then just give back whatever value we got ('', undefined, null)
-        return url;
+export async function parseModels(models: DtdlInterface[]) {
+    const modelParser = createParser(
+        ModelParsingOption.PermitAnyTopLevelElement
+    );
+    try {
+        await modelParser.parse([JSON.stringify(models)]);
+    } catch (err) {
+        if (err.name === 'ParsingException') {
+            return err._parsingErrors
+                .map((e) => `${e.action} ${e.cause}`)
+                .join('\n');
+        }
+
+        return err.message;
     }
 }
 
 /**
- * Sort function to order items alphabetically. Case insensitive sort
+ * Sort function to order items from ascending or descending order, for boolean, numbers and strings. Case insensitive sort
  * NOTE: only works when property is one layer down
  * @param propertyName name of the property to sort on
- * @example listItems.sort(sortAlphabetically('textPrimary'))
+ *  @example listItems.sort(sortAscendingOrDescending('textPrimary'))
  * @returns Sort function to pass to `.sort()`
  */
-export function sortAlphabetically<T>(propertyName: keyof T) {
+export function sortAscendingOrDescending<T>(
+    propertyName: keyof T,
+    descending?: boolean
+) {
     return (a: T, b: T) => {
-        const aVal = (a[propertyName] as unknown) as string;
-        const bVal = (b[propertyName] as unknown) as string;
-        return aVal?.toLowerCase() > bVal?.toLowerCase() ? 1 : -1;
+        let aVal = (a[String(propertyName)] as unknown) as string;
+        // handle the case where the property is not a string, if no value, fall back to empty string so we can sort undefined values consistently
+        aVal =
+            aVal && typeof aVal === 'string' ? aVal.toLowerCase() : aVal || '';
+        let bVal = (b[String(propertyName)] as unknown) as string;
+        // handle the case where the property is not a string, if no value, fall back to empty string so we can sort undefined values consistently
+        bVal =
+            bVal && typeof bVal === 'string' ? bVal.toLowerCase() : bVal || '';
+        let order = -1;
+        if (!descending) {
+            order = aVal > bVal ? 1 : -1;
+        } else {
+            order = aVal < bVal ? 1 : -1;
+        }
+        return order;
     };
+}
+
+/**
+ * remove duplicate objects from an array
+ * @param array array of objects to operate on
+ * @param key key of the property to use as the discriminator
+ * @returns a new copy of the array with only unique values
+ */
+export function removeDuplicatesFromArray<T>(array: T[], key: keyof T) {
+    const check = new Set<string>();
+    return array.filter(
+        (obj) => !check.has(obj[key as string]) && check.add(obj[key as string])
+    );
 }
 
 export function getDebugLogger(
@@ -436,3 +528,296 @@ export function getDebugLogger(
         }
     };
 }
+
+/** checks if a value is null or undefined and returns true if it's not one of those values */
+export function isDefined(value: unknown) {
+    return value != null && value != undefined;
+}
+
+/**
+ * Check if two string type resource display property values are equal
+ * @param value1 resource property value
+ * @param value2 resource property value
+ * @example areResourceValuesEqual('https://exampleurl-1.com', 'https://exampleurl-2', AzureResourceDisplayFields.url)
+ * @returns true if they are equal, false if not or values are empty
+ */
+export function areResourceValuesEqual(
+    value1: string,
+    value2: string,
+    displayField: AzureResourceDisplayFields
+): boolean {
+    if (!value1 || !value2) return false;
+    if (displayField === AzureResourceDisplayFields.url) {
+        if (value1.endsWith('/')) {
+            value1 = value1.slice(0, -1);
+        }
+        if (value2.endsWith('/')) {
+            value2 = value2.slice(0, -1);
+        }
+        return value1.toLowerCase() === value2.toLowerCase();
+    } else {
+        return value1 === value2;
+    }
+}
+
+/**
+ * Retrieving the access permission role ids from role assignments resources
+ * @param roleAssingments list of role assignments to retrieve the role ids from
+ * @returns the list of role ids as AzureAccessPermissionRoles from the role assignment properties
+ */
+export function getRoleIdsFromRoleAssignments(
+    roleAssignments: Array<IAzureResource> = []
+): Array<AzureAccessPermissionRoles> {
+    const assignedRoleIds = new Set<AzureAccessPermissionRoles>();
+    roleAssignments.forEach((roleAssignment) => {
+        const roleId = roleAssignment.properties?.roleDefinitionId
+            ?.split('/')
+            .pop();
+        if (roleId) {
+            assignedRoleIds.add(roleId);
+        }
+    });
+    return Array.from(assignedRoleIds);
+}
+
+/**
+ * Returns the list of missing role ids based on the passed assigned role ids and required role ids to check against
+ * @param assignedRoleIds list of roles already assigned to the user
+ * @param requiredAccessRoles list of required roles as enforced or interchangeables to check against if the user is already assigned
+ * @returns the list of missing role group including missing enforced role ids and missing interchangeable role ids
+ */
+export function getMissingRoleIdsFromRequired(
+    assignedRoleIds: Array<AzureAccessPermissionRoles>,
+    requiredAccessRoles: AzureAccessPermissionRoleGroups
+): AzureAccessPermissionRoleGroups {
+    const missingRoleIds: AzureAccessPermissionRoleGroups = {
+        enforced: [],
+        interchangeables: []
+    };
+
+    requiredAccessRoles.enforced.forEach((enforcedRoleId) => {
+        if (!assignedRoleIds.includes(enforcedRoleId)) {
+            missingRoleIds.enforced.push(enforcedRoleId);
+        }
+    });
+
+    requiredAccessRoles.interchangeables.forEach(
+        // for each interchangeable permission group, at least one of the assignedRoleId needs to exist
+        (interchangeableRoleIdGroup) => {
+            if (
+                !assignedRoleIds.some((assignedRoleId) =>
+                    interchangeableRoleIdGroup.includes(assignedRoleId)
+                )
+            ) {
+                missingRoleIds.interchangeables.push(
+                    interchangeableRoleIdGroup
+                );
+            }
+        }
+    );
+
+    return missingRoleIds;
+}
+
+export const getResourceUrl = (
+    resource: IAzureResource | string, // can either be the url string or azure resource
+    resourceType: AzureResourceTypes, // always pass this in case the resource is string type
+    parentResource?: IAzureResource | string
+): string | null => {
+    if (resource) {
+        if (typeof resource === 'string') {
+            // it means the option is manually entered using freeform
+            if (resourceType) {
+                switch (resourceType) {
+                    case AzureResourceTypes.DigitalTwinInstance:
+                    case AzureResourceTypes.StorageAccount:
+                        return resource;
+                    case AzureResourceTypes.StorageBlobContainer: {
+                        const storageAccountEndpointUrl = getResourceUrl(
+                            parentResource,
+                            AzureResourceTypes.StorageAccount
+                        );
+                        if (storageAccountEndpointUrl) {
+                            return `${
+                                storageAccountEndpointUrl.endsWith('/')
+                                    ? storageAccountEndpointUrl
+                                    : storageAccountEndpointUrl + '/'
+                            }${resource}`;
+                        } else {
+                            return null;
+                        }
+                    }
+                    default:
+                        return null;
+                }
+            } else {
+                return resource;
+            }
+        } else {
+            const resourceType = resource.type;
+            switch (resourceType) {
+                case AzureResourceTypes.DigitalTwinInstance:
+                    return resource.properties?.hostName
+                        ? 'https://' + resource.properties.hostName
+                        : null;
+                case AzureResourceTypes.StorageAccount:
+                    return resource.properties?.primaryEndpoints?.blob;
+                case AzureResourceTypes.StorageBlobContainer: {
+                    const storageAccountEndpointUrl = getResourceUrl(
+                        parentResource,
+                        AzureResourceTypes.StorageAccount
+                    );
+                    if (storageAccountEndpointUrl) {
+                        return `${
+                            storageAccountEndpointUrl.endsWith('/')
+                                ? storageAccountEndpointUrl
+                                : storageAccountEndpointUrl + '/'
+                        }${resource.name}`;
+                    } else {
+                        return null;
+                    }
+                }
+                default:
+                    return null;
+            }
+        }
+    }
+    return null;
+};
+
+export const getResourceUrls = (
+    resources: Array<IAzureResource | string> = [],
+    resourceType: AzureResourceTypes, // always pass this in case the resource is string type
+    parentResource?: IAzureResource | string
+) => {
+    return resources.map((resource) =>
+        getResourceUrl(resource, resourceType, parentResource)
+    );
+};
+
+export const getResourceId = (
+    resource: IAzureResource | string // can either be the url string or azure resource
+): string | null => {
+    if (resource) {
+        if (typeof resource === 'string') {
+            return null;
+        } else {
+            return resource.id;
+        }
+    }
+    return null;
+};
+
+export const getNameOfResource = (
+    resource: string | IAzureResource, // for container type resources string type refers to the name of the container, otherwise it is the url string of the resource
+    resourceType: AzureResourceTypes
+) => {
+    try {
+        if (resource) {
+            if (typeof resource !== 'string') {
+                return resource.name;
+            } else {
+                if (resourceType === AzureResourceTypes.DigitalTwinInstance) {
+                    if (new URL(resource)) {
+                        return resource.split('.')[0].split('://')[1]; // to respect casing in the name of the instance
+                    } else {
+                        return null;
+                    }
+                } else if (resourceType === AzureResourceTypes.StorageAccount) {
+                    const urlObj = new URL(resource);
+                    return urlObj.hostname.split('.')[0];
+                } else if (
+                    resourceType === AzureResourceTypes.StorageBlobContainer
+                ) {
+                    return resource;
+                } else {
+                    return null;
+                }
+            }
+        } else {
+            return null;
+        }
+    } catch (error) {
+        console.error(error.message);
+        return null;
+    }
+};
+
+export const getContainerNameFromUrl = (containerUrl: string) => {
+    try {
+        const containerUrlObj = new URL(containerUrl);
+        return containerUrlObj.pathname.split('/')[1];
+    } catch (error) {
+        console.error(error.message);
+        return null;
+    }
+};
+
+export const getHostNameFromUrl = (urlString: string) => {
+    try {
+        const urlObj = new URL(urlString);
+        return urlObj.hostname;
+    } catch (error) {
+        console.error('Failed getting hostname from url string', error.message);
+        return null;
+    }
+};
+
+export const removeProtocolPartFromUrl = (urlString: string) => {
+    try {
+        const urlObj = new URL(urlString);
+        return urlObj.hostname + urlObj.pathname;
+    } catch (error) {
+        console.error('Failed remove protocol from url string', error.message);
+        return null;
+    }
+};
+
+/** Checking if a given ADX cluster url is a safe url following a certain regex and hostname */
+export const isValidADXClusterUrl = (clusterUrl: string): boolean => {
+    const isValidADXClusterHostUrl = (urlPrefix) =>
+        /^[a-zA-Z0-9]{4,22}.[a-zA-Z0-9]{1,}\b$/.test(urlPrefix);
+
+    if (clusterUrl) {
+        try {
+            const clusterUrlObj = new URL(clusterUrl);
+            if (
+                clusterUrlObj.host.endsWith(CONNECTION_STRING_SUFFIX) &&
+                isValidADXClusterHostUrl(
+                    clusterUrlObj.host.substring(
+                        0,
+                        clusterUrlObj.host.length -
+                            CONNECTION_STRING_SUFFIX.length
+                    )
+                )
+            ) {
+                return true;
+            }
+        } catch (error) {
+            console.error(
+                'Failed validating the ADX cluster url',
+                error.message
+            );
+        }
+    }
+    return false;
+};
+
+/** Creates mock time series data array with data points between now and a certain milliseconds ago */
+export const getMockTimeSeriesDataArrayInLocalTime = (
+    lengthOfSeries = 1,
+    numberOfDataPoints = 5,
+    agoInMillis = 1 * 60 * 60 * 1000
+): Array<Array<TimeSeriesData>> => {
+    const toInMillis = Date.now();
+    const fromInMillis = toInMillis - agoInMillis;
+    return Array.from({ length: lengthOfSeries }).map(() => {
+        const maxLimitVariance = Math.floor(Math.random() * 500); // pick a max value between 0-500 as this timeseries value range to add more variance for values of different timeseries in independent y axes
+        return Array.from({ length: numberOfDataPoints }, () => ({
+            timestamp: Math.floor(
+                Math.random() * (toInMillis - fromInMillis + 1) + fromInMillis
+            ),
+            value: Math.floor(Math.random() * maxLimitVariance)
+        })).sort((a, b) => (a.timestamp as number) - (b.timestamp as number));
+    });
+};

@@ -1,7 +1,6 @@
 import {
     BUILDER_CAMERA_CONTROLS_BOTTOM_OFFSET,
-    VIEWER_CAMERA_CONTROLS_BOTTOM_OFFSET,
-    VIEWER_HEADER_TOP_OFFSET
+    VIEWER_CAMERA_CONTROLS_BOTTOM_OFFSET
 } from '../../Models/Constants/StyleConstants';
 import { WrapperMode } from './SceneView.types';
 import {
@@ -17,7 +16,8 @@ const classNames = {
     button: `${classPrefix}-button`,
     callout: `${classPrefix}-callout`,
     calloutCheckbox: `${classPrefix}-callout-checkbox`,
-    calloutTitle: `${classPrefix}-callout-title`
+    calloutTitle: `${classPrefix}-callout-title`,
+    errorMessage: `${classPrefix}-error-message`
 };
 
 export const getStyles = (
@@ -29,16 +29,6 @@ export const getStyles = (
         root: [classNames.root],
         leftHeaderControlsContainer: [classNames.leftHeader],
         subComponentStyles: {
-            rightHeaderControlsStack: {
-                root: {
-                    alignItems: 'center',
-                    // hacks for dayz. will remove when we pull the control up a layer
-                    right: mode === WrapperMode.Viewer ? 420 : 272,
-                    position: 'absolute',
-                    top: VIEWER_HEADER_TOP_OFFSET,
-                    zIndex: 1
-                }
-            },
             cameraControlsStack: {
                 root: {
                     bottom:

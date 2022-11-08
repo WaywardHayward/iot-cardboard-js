@@ -12,7 +12,6 @@ import { useDeeplinkContext } from '../../../Models/Context/DeeplinkContext/Deep
 
 export const ADT3DSceneBuilderContainer: React.FC<IADT3DSceneBuilderProps> = ({
     scenesConfig,
-    sceneId,
     adapter,
     theme,
     locale,
@@ -49,7 +48,7 @@ export const ADT3DSceneBuilderContainer: React.FC<IADT3DSceneBuilderProps> = ({
                 adapter={adapter}
                 mode={deeplinkState.mode}
                 refetchConfig={refetchConfig}
-                sceneId={sceneId}
+                sceneId={deeplinkState.sceneId}
                 scenesConfig={scenesConfig}
             />
         </BaseComponent>
@@ -83,7 +82,6 @@ const SceneContents: React.FC<ISceneContentsProps> = (props) => {
                 <div className="cb-scene-view-viewer">
                     <ADT3DViewer
                         adapter={adapter}
-                        pollingInterval={10000}
                         sceneId={sceneId}
                         scenesConfig={scenesConfig}
                         refetchConfig={refetchConfig}

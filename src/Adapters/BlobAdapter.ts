@@ -12,7 +12,8 @@ import {
     ADT3DSceneConfigFileNameInBlobStore,
     BlobStorageServiceCorsAllowedHeaders,
     BlobStorageServiceCorsAllowedMethods,
-    BlobStorageServiceCorsAllowedOrigins
+    BlobStorageServiceCorsAllowedOrigins,
+    LOCAL_STORAGE_KEYS
 } from '../Models/Constants/Constants';
 import {
     validate3DConfigWithSchema,
@@ -26,9 +27,14 @@ import {
 import { I3DScenesConfig } from '../Models/Types/Generated/3DScenesConfiguration-v1.0.0';
 import defaultConfig from './__mockData__/3DScenesConfiguration.default.json';
 import { ComponentError } from '../Models/Classes';
+import { handleMigrations, LogConfigFileTelemetry } from './BlobAdapterUtility';
 
+const showVisualRulesFeature =
+    localStorage.getItem(
+        LOCAL_STORAGE_KEYS.FeatureFlags.VisualRules.showVisualRulesFeature
+    ) === 'true';
 export default class BlobAdapter implements IBlobAdapter {
-    protected accountName: string;
+    protected storageAccountName: string;
     protected storageAccountHostName: string;
     protected containerName: string;
     protected containerResourceId: string; // resource scope
@@ -40,12 +46,7 @@ export default class BlobAdapter implements IBlobAdapter {
         authService: IAuthService,
         blobProxyServerPath = '/proxy/blob'
     ) {
-        if (blobContainerUrl) {
-            const containerURL = new URL(blobContainerUrl);
-            this.storageAccountHostName = containerURL.hostname;
-            this.accountName = containerURL.hostname.split('.')[0];
-            this.containerName = containerURL.pathname.split('/')[1];
-        }
+        this.setBlobContainerPath(blobContainerUrl);
         this.blobAuthService = authService;
         this.blobAuthService.login();
         this.blobProxyServerPath = blobProxyServerPath;
@@ -97,11 +98,9 @@ export default class BlobAdapter implements IBlobAdapter {
         if (blobContainerURL) {
             try {
                 const url = new URL(blobContainerURL);
-                if (url.hostname.endsWith('blob.core.windows.net')) {
-                    this.storageAccountHostName = url.hostname;
-                    this.accountName = url.hostname.split('.')[0];
-                    this.containerName = url.pathname.split('/')[1];
-                }
+                this.storageAccountHostName = url.hostname;
+                this.storageAccountName = url.hostname.split('.')[0];
+                this.containerName = url.pathname.split('/')[1];
             } catch (error) {
                 console.error('Unable to parse container URL!');
             }
@@ -141,6 +140,11 @@ export default class BlobAdapter implements IBlobAdapter {
 
             try {
                 const configBlob = await getConfigBlob();
+                if (showVisualRulesFeature) {
+                    // Handle any schema migrations to transform legacy data into valid data
+                    handleMigrations(configBlob.data);
+                }
+                LogConfigFileTelemetry(configBlob.data); // fire and forget the telemetry logging
                 return configBlob;
             } catch (err) {
                 if (

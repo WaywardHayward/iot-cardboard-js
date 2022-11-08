@@ -1,4 +1,5 @@
 import produce from 'immer';
+import { isNumericType } from '../../Components/ADT3DSceneBuilder/Internal/VisualRuleForm/VisualRuleFormUtility';
 import {
     defaultSwatchColors,
     defaultSwatchIcons
@@ -6,11 +7,17 @@ import {
 import { createGUID } from '../Services/Utils';
 import {
     IBehavior,
+    IDataHistoryAggregationType,
+    IDataHistoryChartYAxisType,
+    IDataHistoryWidget,
+    IDTDLPropertyType,
     IExpressionRangeVisual,
     IGaugeWidget,
     ILayer,
     ILinkWidget,
     IPopoverVisual,
+    ITwinToObjectMapping,
+    IValueRange,
     IValueWidget,
     IWidget
 } from '../Types/Generated/3DScenesConfiguration-v1.0.0';
@@ -33,12 +40,15 @@ export enum WidgetType {
     Link = 'Link',
     Value = 'Value',
     Trend = 'Trend',
-    Panel = 'Panel'
+    Panel = 'Panel',
+    DataHistory = 'Data history'
 }
 
 export interface IWidgetLibraryItem {
     title: string;
     description: string;
+    notAvailableDescription?: string;
+    learnMoreLink?: string;
     iconName: string;
     disabled?: boolean;
     data: IWidget;
@@ -55,6 +65,17 @@ export interface IElementTwinAliasItem {
 }
 
 // Default objects
+export const getDefaultElement = (
+    partial?: Partial<ITwinToObjectMapping>
+): ITwinToObjectMapping => ({
+    type: ElementType.TwinToObjectMapping,
+    id: '',
+    displayName: '',
+    primaryTwinID: '',
+    objectIDs: [],
+    ...partial
+});
+
 export const defaultBehavior: IBehavior = {
     id: '',
     displayName: '',
@@ -107,6 +128,30 @@ export const defaultAlertVisual: IExpressionRangeVisual = {
     }
 };
 
+export const getDefaultVisualRule = (): IExpressionRangeVisual => ({
+    id: createGUID(),
+    type: VisualType.ExpressionRangeVisual,
+    valueExpression: '',
+    valueRanges: [],
+    expressionType: 'NumericRange',
+    objectIDs: {
+        expression: 'objectIDs'
+    }
+});
+
+export const getDefaultVisualRuleCondition = (
+    type: IDTDLPropertyType = 'integer',
+    color?: string
+): IValueRange => ({
+    id: createGUID(),
+    values: isNumericType(type) ? [0, 1] : type === 'boolean' ? [true] : [],
+    visual: {
+        color: color,
+        iconName: null,
+        labelExpression: null
+    }
+});
+
 export const getDefaultAlertVisualWithId = () => {
     const uniqueIdDefaultAlertVisual = produce(defaultAlertVisual, (draft) => {
         draft.valueRanges[0].id = createGUID();
@@ -140,6 +185,21 @@ export const defaultValueWidget: IValueWidget = {
         displayName: '',
         valueExpression: null,
         type: 'double'
+    }
+};
+
+export const defaultDataHistoryWidget: IDataHistoryWidget = {
+    id: '',
+    type: WidgetType.DataHistory,
+    widgetConfiguration: {
+        connection: null,
+        displayName: '',
+        timeSeries: [],
+        chartOptions: {
+            aggregationType: 'avg' as IDataHistoryAggregationType,
+            defaultQuickTimeSpanInMillis: 15 * 60 * 1000, // last 15 min by default
+            yAxisType: 'shared' as IDataHistoryChartYAxisType
+        }
     }
 };
 

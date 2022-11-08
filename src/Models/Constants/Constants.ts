@@ -1,11 +1,37 @@
-import { IADTBackgroundColor, IADTObjectColor } from '../Constants';
 import {
+    AzureAccessPermissionRoleGroups,
+    AzureAccessPermissionRoles,
+    IADTBackgroundColor,
+    IADTObjectColor
+} from '../Constants';
+import {
+    defaultDataHistoryWidget,
     defaultGaugeWidget,
     defaultLinkWidget,
     defaultValueWidget,
     IWidgetLibraryItem
 } from '../Classes/3DVConfig';
 import i18n from '../../i18n';
+import { DTDLSchemaType } from '../../Models/Classes/DTDL';
+import IconBoolean from '../../Resources/Static/Boolean.svg';
+import IconData from '../../Resources/Static/Data.svg';
+import IconDatetime from '../../Resources/Static/Datetime.svg';
+import IconDouble from '../../Resources/Static/Double.svg';
+import IconDuration from '../../Resources/Static/duration.svg';
+import IconEnum from '../../Resources/Static/Enum.svg';
+import IconFloat from '../../Resources/Static/Float.svg';
+import IconInteger from '../../Resources/Static/Integer.svg';
+import IconLineString from '../../Resources/Static/linestring.svg';
+import IconLong from '../../Resources/Static/long.svg';
+import IconMap from '../../Resources/Static/map.svg';
+import IconMultiPoint from '../../Resources/Static/multipoint.svg';
+import IconMultiLineString from '../../Resources/Static/multilinestring.svg';
+import IconMultiPolygon from '../../Resources/Static/multipolygon.svg';
+import IconObject from '../../Resources/Static/object.svg';
+import IconPoint from '../../Resources/Static/point.svg';
+import IconPolygon from '../../Resources/Static/polygon.svg';
+import IconString from '../../Resources/Static/string.svg';
+import IconTime from '../../Resources/Static/time.svg';
 import { FontSizes } from '@fluentui/react';
 
 // make sure models in the ADT instance have these definitions and twins have these properties for process graphics card
@@ -34,6 +60,8 @@ const HOW_TO_DOC = 'https://go.microsoft.com/fwlink/?linkid=2195591';
 const QUICK_START_DOC = 'https://go.microsoft.com/fwlink/?linkid=2195592';
 const OVERVIEW_3D_SCENES = 'https://go.microsoft.com/fwlink/?linkid=2195695';
 const GITHUB_REPO = 'https://github.com/microsoft/iot-cardboard-js';
+const ADT_DATA_HISTORY_WITH_ADX =
+    'https://learn.microsoft.com/en-us/azure/digital-twins/concepts-data-history'; // TODO: have golink
 export const DOCUMENTATION_LINKS = {
     overviewDoc: OVERVIEW_3D_SCENES,
     overviewDocSetupSection: `${OVERVIEW_3D_SCENES}#set-up`,
@@ -44,7 +72,32 @@ export const DOCUMENTATION_LINKS = {
     howToExpressions: `${HOW_TO_DOC}#use-custom-advanced-expressions`,
     howToLayers: `${HOW_TO_DOC}#manage-layers`,
     howToTwins: `${HOW_TO_DOC}#twins`,
-    howToWidgets: `${HOW_TO_DOC}#widgets`
+    howToWidgets: `${HOW_TO_DOC}#widgets`,
+    dataHistory: ADT_DATA_HISTORY_WITH_ADX
+};
+
+/** this is the minimum frequency we support for fetching data from ADT */
+export const DEFAULT_REFRESH_RATE_IN_MILLISECONDS = 10000;
+export const ONE_SECOND = 1000;
+export const ONE_MINUTE = 60 * ONE_SECOND;
+export const ONE_HOUR = 60 * ONE_MINUTE;
+
+export const LOCAL_STORAGE_KEYS = {
+    FeatureFlags: {
+        Telemetry: {
+            debugLogging: 'cardboard.debug.telemetryLogging' // enables debug logging for all emitted telemetry events
+        },
+        VisualRules: {
+            showVisualRulesFeature: 'cardboard.feature.visualRulesFeature' // shows visual rules features
+        },
+        DataHistory: {
+            showDataHistoryWidget: 'cardboard.feature.dataHistoryWidget' // shows data history widget widget library
+        }
+    },
+    Environment: {
+        Configuration: 'cb-environment-configuration',
+        Options: 'cb-environment-options'
+    }
 };
 
 export const dtdlPrimitiveTypesList = [
@@ -77,6 +130,19 @@ export enum dtdlPropertyTypesEnum {
     Object = 'Object'
 }
 
+export type PropertyValueType =
+    | 'boolean'
+    | 'date'
+    | 'dateTime'
+    | 'double'
+    | 'duration'
+    | 'float'
+    | 'integer'
+    | 'long'
+    | 'string'
+    | 'time'
+    | 'enum';
+
 export const dtdlComplexTypesList = ['Array', 'Enum', 'Map', 'Object'];
 export const ADTSceneTwinModelId = 'dtmi:com:visualontology:scene;1';
 
@@ -104,13 +170,25 @@ export const availableWidgets: Array<IWidgetLibraryItem> = [
         description: i18n.t('widgets.value.description'),
         iconName: 'NumberField',
         data: defaultValueWidget
+    },
+    {
+        title: i18n.t('widgets.dataHistory.title'),
+        description: i18n.t('widgets.dataHistory.description'),
+        notAvailableDescription: i18n.t(
+            'widgets.dataHistory.notEnabledDescription'
+        ),
+        learnMoreLink: DOCUMENTATION_LINKS.dataHistory,
+        iconName: 'Chart',
+        data: defaultDataHistoryWidget
     }
 ];
 export const twinRefreshMaxAge = 9000;
 export const modelRefreshMaxAge = 3600000;
-export const instancesRefreshMaxAge = 3600000;
+export const timeSeriesConnectionRefreshMaxAge = 3600000;
 
 export const PRIMARY_TWIN_NAME = 'PrimaryTwin';
+export const DTID_PROPERTY_NAME = '$dtId';
+
 export const ValidAdtHostSuffixes = [
     'digitaltwins.azure.net',
     'azuredigitaltwins-ppe.net',
@@ -204,10 +282,30 @@ export const ViewerModeBackgroundColors: Array<IADTBackgroundColor> = [
     }
 ];
 
+/** @deprecated This key will be removed soon since the new local storage structure */
 export const EnvironmentsLocalStorageKey = 'cb-environments';
+/** @deprecated This key will be removed soon since the new local storage structure */
 export const ContainersLocalStorageKey = 'cb-containers';
+/** @deprecated This key will be removed soon since the new local storage structure */
+export const StorageAccountsLocalStorageKey = 'cb-storage-accounts';
+/** @deprecated This key will be removed soon since the new local storage structure */
 export const SelectedEnvironmentLocalStorageKey = 'cb-selected-environment';
+/** @deprecated This key will be removed soon since the new local storage structure */
 export const SelectedContainerLocalStorageKey = 'cb-selected-container';
+
+export const OATFilesStorageKey = 'oat-files';
+export const OATDataStorageKey = 'oat-data';
+export const OATUntargetedRelationshipName = 'Untargeted';
+export const OATRelationshipHandleName = 'Relationship';
+export const OATComponentHandleName = 'Component';
+export const OATExtendHandleName = 'Extend';
+export const OATInterfaceType = 'Interface';
+export const OATNamespaceDefaultValue = 'com:example';
+export const OATCommentLengthLimit = 512;
+export const OATDescriptionLengthLimit = 512;
+export const OATDisplayNameLengthLimit = 64;
+export const OATNameLengthLimit = 64;
+export const OATIdLengthLimit = 2048;
 
 export const SelectedCameraInteractionKey = 'cb-camera-interaction';
 export const ViewerThemeStorageKey = 'cb-viewer-theme';
@@ -237,7 +335,7 @@ export const DTDLPropertyIconographyMap = {
         text: 'date',
         icon: 'Calendar'
     },
-    datetime: {
+    dateTime: {
         text: 'dateTime',
         icon: 'DateTime'
     },
@@ -275,6 +373,115 @@ export const DTDLPropertyIconographyMap = {
     }
 };
 
+export const propertySelectorData = {
+    propertyTags: {
+        primitive: [
+            {
+                name: 'dateTime',
+                title: 'OATPropertyEditor.dateTime',
+                icon: IconDatetime
+            },
+            {
+                name: 'duration',
+                title: 'OATPropertyEditor.duration',
+                icon: IconDuration
+            },
+            {
+                name: 'boolean',
+                title: 'OATPropertyEditor.boolean',
+                icon: IconBoolean
+            },
+            {
+                name: 'string',
+                title: 'OATPropertyEditor.string',
+                icon: IconString
+            },
+            {
+                name: 'data',
+                title: 'OATPropertyEditor.data',
+                icon: IconData
+            },
+            {
+                name: 'long',
+                title: 'OATPropertyEditor.long',
+                icon: IconLong
+            },
+            {
+                name: 'integer',
+                title: 'OATPropertyEditor.integer',
+                icon: IconInteger
+            },
+            {
+                name: 'double',
+                title: 'OATPropertyEditor.double',
+                icon: IconDouble
+            },
+            {
+                name: 'float',
+                title: 'OATPropertyEditor.float',
+                icon: IconFloat
+            },
+            {
+                name: 'time',
+                title: 'OATPropertyEditor.time',
+                icon: IconTime
+            }
+        ],
+        complex: [
+            {
+                name: DTDLSchemaType.Object,
+                title: 'OATPropertyEditor.object',
+                icon: IconObject,
+                complex: true
+            },
+            {
+                name: DTDLSchemaType.Map,
+                title: 'OATPropertyEditor.map',
+                icon: IconMap,
+                complex: true
+            },
+            {
+                name: DTDLSchemaType.Enum,
+                title: 'OATPropertyEditor.enum',
+                icon: IconEnum,
+                complex: true
+            }
+        ],
+        geospatial: [
+            {
+                name: 'point',
+                title: 'OATPropertyEditor.point',
+                icon: IconPoint
+            },
+            {
+                name: 'linestring',
+                title: 'OATPropertyEditor.linestring',
+                icon: IconLineString
+            },
+            {
+                name: 'polygon',
+                title: 'OATPropertyEditor.polygon',
+                icon: IconPolygon
+            },
+            {
+                name: 'multiPoint',
+                title: 'OATPropertyEditor.multiPoint',
+                icon: IconMultiPoint
+            },
+            {
+                name: 'multiLinestring',
+                title: 'OATPropertyEditor.multiLinestring',
+                icon: IconMultiLineString
+            },
+            {
+                name: 'multiPolygon',
+                title: 'OATPropertyEditor.multiPolygon',
+                icon: IconMultiPolygon
+            }
+        ]
+    }
+};
+
 export const BlobStorageServiceCorsAllowedOrigins = [window.location.origin];
 
 export const BlobStorageServiceCorsAllowedMethods = [
@@ -289,3 +496,49 @@ export const BlobStorageServiceCorsAllowedHeaders = [
     'x-ms-version',
     'x-ms-blob-type'
 ];
+
+export const EnforcedStorageAccountAccessRoleIds: Array<AzureAccessPermissionRoles> = [];
+export const InterchangeableStorageAccountAccessRoleIds: Array<
+    Array<AzureAccessPermissionRoles>
+> = [
+    [AzureAccessPermissionRoles.Owner, AzureAccessPermissionRoles.Contributor]
+];
+export const RequiredAccessRoleGroupForStorageAccount: AzureAccessPermissionRoleGroups = {
+    enforced: EnforcedStorageAccountAccessRoleIds,
+    interchangeables: InterchangeableStorageAccountAccessRoleIds
+};
+
+export const EnforcedStorageContainerAccessRoleIds: Array<AzureAccessPermissionRoles> = [];
+export const InterchangeableStorageContainerAccessRoleIds: Array<
+    Array<AzureAccessPermissionRoles>
+> = [
+    [
+        AzureAccessPermissionRoles['Storage Blob Data Owner'],
+        AzureAccessPermissionRoles['Storage Blob Data Contributor']
+    ],
+    [
+        AzureAccessPermissionRoles.Reader,
+        AzureAccessPermissionRoles.Contributor,
+        AzureAccessPermissionRoles.Owner
+    ]
+];
+export const RequiredAccessRoleGroupForStorageContainer: AzureAccessPermissionRoleGroups = {
+    enforced: EnforcedStorageContainerAccessRoleIds,
+    interchangeables: InterchangeableStorageContainerAccessRoleIds
+};
+
+export const EnforcedADTInstanceAccessRoleIds: Array<AzureAccessPermissionRoles> = [];
+export const InterchangeableADTInstanceAccessRoleIds: Array<
+    Array<AzureAccessPermissionRoles>
+> = [
+    [
+        AzureAccessPermissionRoles['Azure Digital Twins Data Owner'],
+        AzureAccessPermissionRoles['Azure Digital Twins Data Reader']
+    ]
+];
+export const RequiredAccessRoleGroupForADTInstance: AzureAccessPermissionRoleGroups = {
+    enforced: EnforcedADTInstanceAccessRoleIds,
+    interchangeables: InterchangeableADTInstanceAccessRoleIds
+};
+
+export const CONNECTION_STRING_SUFFIX = '.kusto.windows.net';

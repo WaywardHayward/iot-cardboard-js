@@ -8,7 +8,7 @@
 export type IElement = ITwinToObjectMapping | ICustomProperty;
 export type IDataSource = IElementTwinToObjectMappingDataSource | ICustomProperty;
 export type IVisual = IPopoverVisual | IExpressionRangeVisual;
-export type IWidget = IGaugeWidget | ILinkWidget | IValueWidget;
+export type IWidget = IGaugeWidget | ILinkWidget | IValueWidget | IDataHistoryWidget;
 /**
  * Widget group to which a widget belongs
  */
@@ -29,6 +29,12 @@ export type IDTDLPropertyType =
     | 'long'
     | 'string'
     | 'time';
+/**
+ * A list of timeseries to render in the chart
+ */
+export type IDataHistoryTimeSeries = IDataHistoryBasicTimeSeries[];
+export type IDataHistoryChartYAxisType = 'shared' | 'independent';
+export type IDataHistoryAggregationType = 'min' | 'max' | 'avg';
 export type IExpressionRangeType = 'NumericRange' | 'CategoricalValues';
 
 /**
@@ -49,14 +55,29 @@ export interface I3DScenesConfig {
  * A scene is a single view that can be rendered from 3D assets
  */
 export interface IScene {
+    assets: IAsset[];
+    behaviorIDs: string[];
+    elements: IElement[];
     id: string;
-    displayName: string;
     description?: string;
+    displayName: string;
     latitude?: number;
     longitude?: number;
-    elements: IElement[];
-    behaviorIDs: string[];
-    assets: IAsset[];
+    pollingConfiguration?: IPollingConfiguration;
+}
+/**
+ * A 3D asset used to create the scene
+ */
+export interface IAsset {
+    type: string;
+    url: string;
+    extensionProperties?: IExtensionProperties;
+}
+/**
+ * Optional bag of non-schematized extension properties
+ */
+export interface IExtensionProperties {
+    [k: string]: unknown;
 }
 /**
  * An elements maps twins to objects in the scene
@@ -82,12 +103,6 @@ export interface ITwinToObjectMapping {
     extensionProperties?: IExtensionProperties;
 }
 /**
- * Optional bag of non-schematized extension properties
- */
-export interface IExtensionProperties {
-    [k: string]: unknown;
-}
-/**
  * Free form property
  */
 export interface ICustomProperty {
@@ -95,12 +110,13 @@ export interface ICustomProperty {
     [k: string]: unknown;
 }
 /**
- * A 3D asset used to create the scene
+ * Configures the parameters for the polling of twin data from the twin graph.
  */
-export interface IAsset {
-    type: string;
-    url: string;
-    extensionProperties?: IExtensionProperties;
+export interface IPollingConfiguration {
+    /**
+     * The minimum time in milliseconds that data should be refreshed. NOTE: it may take longer than this to fetch the data so this is a floor value intended to limit the frequency when the consumer knows the data is not updated more often than a particular frequency.
+     */
+    minimumPollingFrequency: number;
 }
 /**
  * A behavior applies visual or interactive representations of twin state to objects in the scene
@@ -222,6 +238,54 @@ export interface IValueWidgetConfiguration {
     type: IDTDLPropertyType;
 }
 /**
+ * A data history widget which uses twin properties to show timeseries data
+ */
+export interface IDataHistoryWidget {
+    type: 'Data history';
+    id: string;
+    groupID?: IGroupID;
+    widgetConfiguration: IDataHistoryWidgetConfiguration;
+    extensionProperties?: IExtensionProperties;
+}
+/**
+ * Widget configuration specifies widget specific properties that are used for rendering this data history
+ */
+export interface IDataHistoryWidgetConfiguration {
+    /**
+     * Database connection information of timeseries data
+     */
+    connection: IADXTimeSeriesConnection;
+    displayName: string;
+    timeSeries: IDataHistoryTimeSeries;
+    chartOptions: IDataHistoryChartOptions;
+}
+/**
+ * Azure Data Explorer connection information for time series data
+ */
+export interface IADXTimeSeriesConnection {
+    adxClusterUrl: string;
+    adxDatabaseName: string;
+    adxTableName: string;
+}
+/**
+ * A basic timeseries to be rendered in the chart of the data history widget
+ */
+export interface IDataHistoryBasicTimeSeries {
+    id: string;
+    expression: string;
+    unit?: string;
+    label?: string;
+}
+/**
+ * Options to be used while rendering chart for data history widget
+ */
+export interface IDataHistoryChartOptions {
+    yAxisType: IDataHistoryChartYAxisType;
+    defaultQuickTimeSpanInMillis: number;
+    aggregationType: IDataHistoryAggregationType;
+    extensionProperties?: IExtensionProperties;
+}
+/**
  * objectIDs specify the objects in the scene that a visual pertains to
  */
 export interface IObjectIDs {
@@ -233,12 +297,15 @@ export interface IObjectIDs {
  */
 export interface IExpressionRangeVisual {
     type: 'ExpressionRangeVisual';
+    id?: string;
+    displayName?: string;
     /**
      * Expression to evaluate
      */
     valueExpression: string;
     expressionType: IExpressionRangeType;
     valueRanges: IValueRange[];
+    valueRangeType?: IDTDLPropertyType;
     objectIDs: IObjectIDs;
     extensionProperties?: IExtensionProperties;
 }

@@ -36,16 +36,20 @@ import {
     IPropertyInspectorAdapter,
     IAzureResource,
     PRIMARY_TWIN_NAME,
-    IADTInstance,
-    IAzureUserSubscriptions,
     AzureResourceTypes,
-    AzureResourceProviderEndpoints,
-    AzureAccessPermissionRoles,
-    MissingAzureRoleDefinitionAssignments,
+    AzureAccessPermissionRoleGroups,
     IAzureRoleAssignment,
     BlobStorageServiceCorsAllowedOrigins,
     BlobStorageServiceCorsAllowedMethods,
-    BlobStorageServiceCorsAllowedHeaders
+    BlobStorageServiceCorsAllowedHeaders,
+    IAzureSubscription,
+    AzureResourceDisplayFields,
+    AdapterMethodParamsForGetAzureResources,
+    RequiredAccessRoleGroupForStorageContainer,
+    AdapterMethodParamsForSearchTwinsByQuery,
+    IADXConnection,
+    ADTResourceIdentifier,
+    ADXTimeSeries
 } from '../Models/Constants';
 import seedRandom from 'seedrandom';
 import {
@@ -62,10 +66,10 @@ import ADTScenesConfigData from '../Models/Classes/AdapterDataClasses/ADTScenesC
 import ADT3DViewerData from '../Models/Classes/AdapterDataClasses/ADT3DViewerData';
 import {
     AzureMissingRoleDefinitionsData,
-    AzureResourcesData,
-    AzureRoleAssignmentsData
+    AzureResourcesData
 } from '../Models/Classes/AdapterDataClasses/AzureManagementData';
 import {
+    getMockTimeSeriesDataArrayInLocalTime,
     getModelContentType,
     parseDTDLModelsAsync,
     validate3DConfigWithSchema
@@ -85,8 +89,12 @@ import ExpandedADTModelData from '../Models/Classes/AdapterDataClasses/ExpandedA
 import { applyPatch, Operation } from 'fast-json-patch';
 import { DTDLType } from '../Models/Classes/DTDL';
 import i18n from '../i18n';
-import ADTInstancesData from '../Models/Classes/AdapterDataClasses/ADTInstancesData';
+import ViewerConfigUtility from '../Models/Classes/ViewerConfigUtility';
+import ADTInstanceTimeSeriesConnectionData from '../Models/Classes/AdapterDataClasses/ADTInstanceTimeSeriesConnectionData';
+import { handleMigrations } from './BlobAdapterUtility';
+import ADXTimeSeriesData from '../Models/Classes/AdapterDataClasses/ADXTimeSeriesData';
 
+const MAX_RESOURCE_TAKE_LIMIT = 5;
 export default class MockAdapter
     implements
         IKeyValuePairAdapter,
@@ -107,6 +115,7 @@ export default class MockAdapter
         'mockADTInstanceResourceName.api.wcus.digitaltwins.azure.net';
     private mockContainerUrl =
         'https://mockStorageAccountName.blob.core.windows.net/mockContainerName';
+    private mockADXConnectionInformation: IADXConnection;
     private seededRng = seedRandom('cardboard seed');
     private mockTwinPropertiesMap: {
         [id: string]: Record<string, unknown>;
@@ -488,6 +497,8 @@ export default class MockAdapter
             await this.mockNetwork();
             // If schema validation fails - error with be thrown and classified by adapterMethodSandbox
             const config = validate3DConfigWithSchema(this.scenesConfig);
+            // To test out migrations with mock data
+            handleMigrations(config);
             return new ADTScenesConfigData(config);
         });
     }
@@ -567,90 +578,86 @@ export default class MockAdapter
 
             if (scene.behaviorIDs) {
                 // cycle through behaviors for scene
-                for (const sceneBehavior of scene.behaviorIDs) {
+                for (const behaviorId of scene.behaviorIDs) {
                     // cycle through all behaviors
                     // check if behavior is relevent for the current scene
-                    for (const behavior of config.configuration?.behaviors)
-                        if (sceneBehavior === behavior.id) {
-                            const mappingIds: string[] = [];
-                            // cycle through the datasources of behavior
-                            for (const dataSource of behavior.datasources) {
-                                // if its a TwinToObjectMappingDatasource get the mapping id
-                                if (
-                                    dataSource.type ===
-                                    DatasourceType.ElementTwinToObjectMappingDataSource
-                                ) {
-                                    dataSource.elementIDs.forEach(
-                                        (mappingId) => {
-                                            mappingIds.push(mappingId);
-                                        }
-                                    );
-                                }
+                    const behavior = ViewerConfigUtility.getBehaviorById(
+                        config,
+                        behaviorId
+                    );
+                    if (!behavior) {
+                        continue;
+                    }
+                    const mappingIds = new Set<string>();
+                    // cycle through the datasources of behavior
+                    for (const dataSource of behavior.datasources) {
+                        // if its a TwinToObjectMappingDatasource get the mapping id
+                        if (
+                            dataSource.type ===
+                            DatasourceType.ElementTwinToObjectMappingDataSource
+                        ) {
+                            dataSource.elementIDs.forEach((mappingId) => {
+                                mappingIds.add(mappingId);
+                            });
+                        }
+                    }
 
-                                // TODO get FilteredTwinDatasources
-                            }
+                    // cycle through mapping ids to get twins for behavior and scene
+                    for (const id of Array.from(mappingIds)) {
+                        const twins = {};
+                        const element: ITwinToObjectMapping = scene.elements?.find(
+                            (mapping) =>
+                                mapping.type ===
+                                    ElementType.TwinToObjectMapping &&
+                                mapping.id === id
+                        ) as ITwinToObjectMapping;
 
-                            // cycle through mapping ids to get twins for behavior and scene
-                            for (const id of mappingIds) {
-                                const twins = {};
-                                const element: ITwinToObjectMapping = scene.elements.find(
-                                    (mapping) =>
-                                        mapping.type ===
-                                            ElementType.TwinToObjectMapping &&
-                                        mapping.id === id
-                                ) as ITwinToObjectMapping;
+                        if (element) {
+                            // get primary twin
+                            twins[PRIMARY_TWIN_NAME] = this.mockTwins.find(
+                                (t) => t.$dtId === element.primaryTwinID
+                            ) || {
+                                $dtId: 'machineID1',
+                                InFlow: 300,
+                                OutFlow: 250,
+                                Temperature: 50,
+                                displayName: 'My Machine 1'
+                            };
 
-                                if (element) {
-                                    // get primary twin
-                                    twins[
-                                        PRIMARY_TWIN_NAME
-                                    ] = this.mockTwins.find(
-                                        (t) => t.$dtId === element.primaryTwinID
+                            // check for twin aliases and add to twins object
+                            if (element.twinAliases) {
+                                for (const alias of Object.keys(
+                                    element.twinAliases
+                                )) {
+                                    twins[alias] = this.mockTwins.find(
+                                        (t) =>
+                                            t.$dtId ===
+                                            element.twinAliases[alias]
                                     ) || {
-                                        $dtId: 'machineID1',
+                                        $dtId: 'machineID2',
                                         InFlow: 300,
                                         OutFlow: 250,
                                         Temperature: 50,
-                                        displayName: 'My Machine 1'
+                                        displayName: 'My Machine 2'
                                     };
-
-                                    // check for twin aliases and add to twins object
-                                    if (element.twinAliases) {
-                                        for (const alias of Object.keys(
-                                            element.twinAliases
-                                        )) {
-                                            twins[alias] = this.mockTwins.find(
-                                                (t) =>
-                                                    t.$dtId ===
-                                                    element.twinAliases[alias]
-                                            ) || {
-                                                $dtId: 'machineID2',
-                                                InFlow: 300,
-                                                OutFlow: 250,
-                                                Temperature: 50,
-                                                displayName: 'My Machine 2'
-                                            };
-                                        }
-                                    }
-
-                                    const existingSceneVisual = sceneVisuals.find(
-                                        (sV) => sV.element.id === id
-                                    );
-                                    if (!existingSceneVisual) {
-                                        const sceneVisual = new SceneVisual(
-                                            element,
-                                            [behavior],
-                                            twins
-                                        );
-                                        sceneVisuals.push(sceneVisual);
-                                    } else {
-                                        existingSceneVisual.behaviors.push(
-                                            behavior
-                                        );
-                                    }
                                 }
                             }
+
+                            const existingSceneVisual = sceneVisuals.find(
+                                (sV) => sV.element.id === id
+                            );
+                            if (!existingSceneVisual) {
+                                const sceneVisual = new SceneVisual(
+                                    element,
+                                    [behavior],
+                                    twins
+                                );
+                                sceneVisuals.push(sceneVisual);
+                            } else {
+                                existingSceneVisual.behaviors.push(behavior);
+                            }
                         }
+                    }
                 }
             }
         }
@@ -671,8 +678,62 @@ export default class MockAdapter
             return new AdapterResult({
                 result: new ADTAdapterTwinsData({
                     value: this.mockTwins.filter((t) =>
-                        t.$dtId.includes(params.searchTerm)
+                        t[params.searchProperty].includes(params.searchTerm)
                     )
+                }),
+                errorInfo: null
+            });
+        } catch (err) {
+            return new AdapterResult<ADTAdapterTwinsData>({
+                result: null,
+                errorInfo: { catastrophicError: err, errors: [err] }
+            });
+        }
+    }
+
+    getFirstPropertyFromQuery = (query: string) => {
+        // Initial position index is the index after WHERE in the query
+        // used here to search for first property after the WHERE clause
+        const initialPositionIndex = query.indexOf('WHERE ') + 6;
+        return query
+            .substring(
+                initialPositionIndex,
+                query.indexOf(' ', initialPositionIndex)
+            )
+            .split('T.')[1];
+    };
+
+    getFirstValueFromQuery = (query: string) => {
+        // Find value after equals operator to match to
+        // Return null in case equals operator is not found to return all twins
+        const equalsPosition = query.indexOf(' = ');
+        if (equalsPosition !== -1) {
+            return query
+                .substring(
+                    equalsPosition + 2,
+                    query.indexOf('\n', equalsPosition + 2)
+                )
+                .trim();
+        } else {
+            return null;
+        }
+    };
+
+    async searchTwinsByQuery(params: AdapterMethodParamsForSearchTwinsByQuery) {
+        try {
+            await this.mockNetwork();
+            const firstProperty = this.getFirstPropertyFromQuery(params.query);
+            const firstValue = this.getFirstValueFromQuery(params.query);
+
+            const filteredTwins = this.mockTwins.filter((twin) => {
+                return String(twin[`${firstProperty}`]) === firstValue;
+            });
+
+            return new AdapterResult({
+                // Return filtered results only in the case that user is searching for equals
+                // else return all twins
+                result: new ADTAdapterTwinsData({
+                    value: firstValue ? filteredTwins : this.mockTwins
                 }),
                 errorInfo: null
             });
@@ -697,13 +758,23 @@ export default class MockAdapter
     }
 
     setAdtHostUrl(hostName: string) {
+        if (hostName.startsWith('https://'))
+            hostName = hostName.replace('https://', '');
         this.mockEnvironmentHostName = hostName;
     }
 
+    setADXConnectionInformation = (
+        adxConnectionInformation: IADXConnection
+    ) => {
+        this.mockADXConnectionInformation = adxConnectionInformation;
+    };
+
+    getADXConnectionInformation = () => {
+        return this.mockADXConnectionInformation;
+    };
+
     async getSubscriptions() {
-        const mockSubscriptions: IAzureUserSubscriptions = {
-            value: mockSubscriptionData
-        };
+        const mockSubscriptions: Array<IAzureSubscription> = mockSubscriptionData;
         try {
             await this.mockNetwork();
 
@@ -719,18 +790,30 @@ export default class MockAdapter
         }
     }
 
-    async getResources(
-        resourceType: AzureResourceTypes,
-        _providerEndpoint: string
-    ) {
-        const mockContainerResources: Array<IAzureResource> = [
+    async getResources({
+        resourceType
+    }: AdapterMethodParamsForGetAzureResources) {
+        const mockStorageContainerResources: Array<IAzureResource> = [
             {
                 name: 'container123',
                 id:
                     '/subscriptions/subscription123/resourceGroups/resourceGroup123/providers/Microsoft.Storage/storageAccounts/storageAccount123/blobServices/default/containers/container123',
-                type: AzureResourceTypes.Container,
+                type: AzureResourceTypes.StorageBlobContainer,
                 properties: {
                     publicAccess: 'Container'
+                }
+            }
+        ];
+        const mockStorageAccountResources: Array<IAzureResource> = [
+            {
+                name: 'storageAccount123',
+                id:
+                    '/subscriptions/subscription123/resourceGroups/resourceGroup123/providers/Microsoft.Storage/storageAccounts/storageAccount123',
+                type: AzureResourceTypes.StorageAccount,
+                properties: {
+                    primaryEndpoints: {
+                        blob: 'https://storageAccount123.blob.core.windows.net/'
+                    }
                 }
             }
         ];
@@ -739,51 +822,68 @@ export default class MockAdapter
                 name: 'adtInstance123',
                 id:
                     '/subscriptions/subscription123/resourcegroups/resourceGroup123/providers/Microsoft.DigitalTwins/digitalTwinsInstances/adtInstance123',
-                type: AzureResourceTypes.ADT,
+                type: AzureResourceTypes.DigitalTwinInstance,
                 location: 'westus2',
                 properties: {
                     hostName:
-                        'https://adtInstance123.api.wus2.ss.azuredigitaltwins-test.net'
+                        'adtInstance123.api.wus2.ss.azuredigitaltwins-test.net'
                 }
             }
         ];
-        if (resourceType === AzureResourceTypes.ADT) {
+        if (resourceType === AzureResourceTypes.DigitalTwinInstance) {
             return new AdapterResult({
                 result: new AzureResourcesData(mockADTInstanceResources),
                 errorInfo: null
             });
-        } else if (resourceType === AzureResourceTypes.Container) {
+        } else if (resourceType === AzureResourceTypes.StorageBlobContainer) {
             return new AdapterResult({
-                result: new AzureResourcesData(mockContainerResources),
+                result: new AzureResourcesData(mockStorageContainerResources),
+                errorInfo: null
+            });
+        } else if (resourceType === AzureResourceTypes.StorageAccount) {
+            return new AdapterResult({
+                result: new AzureResourcesData(mockStorageAccountResources),
                 errorInfo: null
             });
         } else {
             return new AdapterResult({
-                result: null,
+                result: new AzureResourcesData([]),
                 errorInfo: null
             });
         }
     }
 
-    async getADTInstances() {
+    async getResourcesByPermissions(params: {
+        getResourcesParams: AdapterMethodParamsForGetAzureResources;
+        requiredAccessRoles: AzureAccessPermissionRoleGroups;
+    }) {
         try {
-            const adtInstanceResourcesResult = await this.getResources(
-                AzureResourceTypes.ADT,
-                AzureResourceProviderEndpoints.ADT
+            const getResourcesResult = await this.getResources(
+                params.getResourcesParams
             );
-            const adtInstanceResources: Array<IAzureResource> = adtInstanceResourcesResult.getData();
-            const digitalTwinsInstances: Array<IADTInstance> = adtInstanceResources.map(
-                (adtInstanceResource) =>
-                    ({
-                        id: adtInstanceResource.id,
-                        name: adtInstanceResource.name,
-                        hostName: adtInstanceResource.properties['hostName'],
-                        location: adtInstanceResource.location
-                    } as IADTInstance)
-            );
+            let resources: Array<IAzureResource> = getResourcesResult.getData();
+
+            if (resources?.length) {
+                // apply searchParams to the list of resources returned
+                if (params.getResourcesParams.searchParams?.filter) {
+                    resources = resources.filter((resource) =>
+                        Object.keys(AzureResourceDisplayFields).some(
+                            (displayField) =>
+                                !!resource[displayField]?.includes(displayField)
+                        )
+                    );
+                }
+                resources = resources.slice(
+                    0,
+                    params.getResourcesParams.searchParams?.take ||
+                        MAX_RESOURCE_TAKE_LIMIT
+                ); // take the first n number of resources to make sure the browser won't crash with making thousands of requests
+
+                // no need to emulate hasRoleDefinitions
+            }
 
             return new AdapterResult({
-                result: new ADTInstancesData(digitalTwinsInstances),
+                result: new AzureResourcesData(resources),
                 errorInfo: null
             });
         } catch (err) {
@@ -799,13 +899,9 @@ export default class MockAdapter
             await this.mockNetwork();
 
             return new AdapterResult({
-                result: new AzureMissingRoleDefinitionsData({
-                    alternated: [
-                        AzureAccessPermissionRoles[
-                            'Storage Blob Data Contributor'
-                        ]
-                    ]
-                }),
+                result: new AzureMissingRoleDefinitionsData(
+                    RequiredAccessRoleGroupForStorageContainer
+                ),
                 errorInfo: null
             });
         } catch (err) {
@@ -817,13 +913,13 @@ export default class MockAdapter
     }
 
     async addMissingRolesToStorageContainer(
-        _missingRoleDefinitionIds: MissingAzureRoleDefinitionAssignments
+        _missingRoleDefinitionIds: AzureAccessPermissionRoleGroups
     ) {
         try {
             await this.mockNetwork();
 
             return new AdapterResult({
-                result: new AzureRoleAssignmentsData([
+                result: new AzureResourcesData([
                     {
                         properties: {
                             roleDefinitionId:
@@ -838,7 +934,7 @@ export default class MockAdapter
                 errorInfo: null
             });
         } catch (err) {
-            return new AdapterResult<AzureRoleAssignmentsData>({
+            return new AdapterResult<AzureResourcesData>({
                 result: null,
                 errorInfo: { catastrophicError: err, errors: [err] }
             });
@@ -858,12 +954,6 @@ export default class MockAdapter
                 Path:
                     'https://cardboardresources.blob.core.windows.net/cardboard-mock-files/BluePackingLine.gltf',
                 Properties: { 'Content-Length': 2000 }
-            },
-            {
-                Name: '3DScenesConfiguration.json',
-                Path:
-                    'https://cardboardresources.blob.core.windows.net/cardboard-mock-files/3DScenesConfiguration.json',
-                Properties: { 'Content-Length': 3000 }
             }
         ];
         try {
@@ -924,6 +1014,83 @@ export default class MockAdapter
             });
         } catch (err) {
             return new AdapterResult<StorageBlobServiceCorsRulesData>({
+                result: null,
+                errorInfo: { catastrophicError: err, errors: [err] }
+            });
+        }
+    }
+
+    async getTimeSeriesConnectionInformation(
+        _adtInstanceIdentifier: ADTResourceIdentifier
+    ) {
+        try {
+            await this.mockNetwork();
+
+            return new AdapterResult({
+                result: new ADTInstanceTimeSeriesConnectionData({
+                    kustoClusterUrl:
+                        'https://mockKustoClusterName.westus2.kusto.windows.net',
+                    kustoDatabaseName: 'mockKustoDatabaseName',
+                    kustoTableName: 'mockKustoTableName'
+                }),
+                errorInfo: null
+            });
+        } catch (err) {
+            return new AdapterResult<ADTInstanceTimeSeriesConnectionData>({
+                result: null,
+                errorInfo: { catastrophicError: err, errors: [err] }
+            });
+        }
+    }
+
+    /** Returns a mock data based on the passed query by parsing it
+     * to get quick time, twin id and twin property to reflect
+     * on the generated mock data */
+    async getTimeSeriesData(query: string) {
+        let mockData: Array<ADXTimeSeries> = [];
+        try {
+            await this.mockNetwork();
+            try {
+                const listOfTimeSeries = query.split(';'); // split the query by statements for each time series
+                listOfTimeSeries.forEach((ts) => {
+                    const split = ts.split('ago(')[1].split(')'); // split the query by timestamp 'ago' operation
+                    const quickTimeSpanInMillis = Number(
+                        split[0].replace('ms', '') // get the quick time in milliseconds and cast it to number
+                    );
+                    const idAndPropertyPart = split[1]
+                        .split('Id == ')[1]
+                        .split(' and Key == '); // get the part of the query where there is twin id and property information
+                    const twinId = idAndPropertyPart[0].replace(/'/g, ''); // get the id and replace the single quote characters around the string
+                    const twinProperty = idAndPropertyPart[1]
+                        .split(' | order by')[0]
+                        .replace(/'/g, ''); // get the twin property and replace the single quote characters around the string
+
+                    mockData.push({
+                        id: twinId,
+                        key: twinProperty,
+                        data: getMockTimeSeriesDataArrayInLocalTime(
+                            1,
+                            5,
+                            quickTimeSpanInMillis
+                        )[0]
+                    });
+                });
+            } catch (error) {
+                console.log(error);
+                mockData = [
+                    {
+                        id: 'PasteurizationMachine_A01',
+                        key: 'InFlow',
+                        data: getMockTimeSeriesDataArrayInLocalTime(1)[0]
+                    }
+                ];
+            }
+            return new AdapterResult({
+                result: new ADXTimeSeriesData(mockData),
+                errorInfo: null
+            });
+        } catch (err) {
+            return new AdapterResult<ADXTimeSeriesData>({
                 result: null,
                 errorInfo: { catastrophicError: err, errors: [err] }
             });
